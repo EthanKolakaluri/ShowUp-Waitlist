@@ -7,18 +7,16 @@
  * (see README.md, step 2).
  */
 window.SHOWUP_CONFIG = {
-  // Stripe Payment Link for the $9.99 founding reservation.
-  // Looks like: "https://buy.stripe.com/xxxxxxxxxxxx"
-  STRIPE_PAYMENT_LINK: "",
-
   // Google Apps Script web app URL (from Deploy → New deployment → Web app).
+  // This one URL creates the Stripe Checkout, confirms payments and writes
+  // to your Google Sheet.
   // Looks like: "https://script.google.com/macros/s/xxxxxxxx/exec"
   SHEETS_WEB_APP_URL: "",
 
   // Where people can reach you (shown in the footer and on errors).
   CONTACT_EMAIL: "",
 
-  // Price shown on the page. Must match your Stripe Payment Link.
+  // Price shown on the page. Must match your Stripe Price.
   PRICE_LABEL: "$9.99",
   REGULAR_PRICE_LABEL: "$14.99",
 
