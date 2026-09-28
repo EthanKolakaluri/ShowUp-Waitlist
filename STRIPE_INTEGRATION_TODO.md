@@ -16,11 +16,11 @@ The following values are placeholders and must be updated before going live.
 | Field | Current Value | What to Set |
 |-------|--------------|-------------|
 | mode (`CONFIG.MODE`) | `payment` | Leave as `payment`: the $9.99 reservation is a one-time charge. Use `subscription` only if you later switch to recurring billing. |
-| success_url (`CONFIG.SUCCESS_URL`) | `https://example.com/success.html?session_id={CHECKOUT_SESSION_ID}` | Your live success page. For this repo: `https://ethankolakaluri.github.io/ShowUp-Waitlist/success.html?session_id={CHECKOUT_SESSION_ID}`. Keep the `{CHECKOUT_SESSION_ID}` template exactly as written. |
-| cancel_url (`CONFIG.CANCEL_URL`) | `https://example.com/#reserve` | Where people land if they back out of checkout. For this repo: `https://ethankolakaluri.github.io/ShowUp-Waitlist/#reserve` |
+| success_url (`CONFIG.SUCCESS_URL`) | `https://ethankolakaluri.github.io/ShowUp-Waitlist/success.html?session_id={CHECKOUT_SESSION_ID}` | Done. Keep the `{CHECKOUT_SESSION_ID}` template exactly as written. |
+| cancel_url (`CONFIG.CANCEL_URL`) | `https://ethankolakaluri.github.io/ShowUp-Waitlist/#reserve` | Done. Where people land if they back out of checkout. |
 | line_items[].price (`CONFIG.STRIPE_PRICE_ID`) | `price_...` | Your Stripe Price ID for the $9.99 one-time reservation, from the Dashboard (https://dashboard.stripe.com/prices) or API. |
 
-Until all four are real values, the form shows "Checkout isn't set up yet" and nothing is sent to Stripe.
+Until the price is a real value, the form shows "Checkout isn't set up yet" and nothing is sent to Stripe.
 
 ### Other empty fields
 
@@ -90,9 +90,10 @@ Set `CONFIG.SUCCESS_URL` and `CONFIG.CANCEL_URL` in `apps-script/Code.gs` using 
 1. Create a Google Sheet, then **Extensions → Apps Script**.
 2. Paste all of `apps-script/Code.gs` (with your values filled in) and save.
 3. Add the `STRIPE_API_KEY` script property (step 1).
-4. Select `setup` in the toolbar and click **Run**, then approve permissions. This creates the **Checkout started** and **Reservations** tabs and a 15-minute payment sync.
+4. Select `setup` in the toolbar and click **Run**, then approve permissions. Tick **Select all**: spreadsheets, external service, run when you're not present, send email as you, and see your email address (only used by `sendTestEmail`). This creates the **Checkout started** and **Reservations** tabs and a 15-minute payment sync.
+   - Optional: select `sendTestEmail` and click **Run** to get the confirmation email in your own inbox.
 5. **Deploy → New deployment → Web app**, Execute as **Me**, Who has access **Anyone**. Copy the URL into `SHEETS_WEB_APP_URL` in `assets/js/config.js` and commit it to the repo.
-6. After any later change to `Code.gs`: **Deploy → Manage deployments → Edit → Version: New version**. The URL stays the same.
+6. After any later change to `Code.gs`: run `setup` once (so Google can ask for any new permission), then **Deploy → Manage deployments → Edit → Version: New version**. The URL stays the same. If you skip the permission step after a change that needs a new one, the web app stops working until you approve it.
 
 ### 5. GitHub Pages
 
@@ -102,7 +103,8 @@ Repo **Settings → Pages → Deploy from a branch → `main` / `(root)`**. The 
 
 ```
 apps-script/Code.gs      Creates Checkout Sessions (action "checkout"), confirms payments,
-                         writes the Sheet, 15-minute sync. All Stripe calls live here.
+                         writes the Sheet, sends the confirmation email, 15-minute sync.
+                         All Stripe calls live here.
 assets/js/config.js      SHEETS_WEB_APP_URL and site settings (no secrets)
 assets/js/main.js        Form → calls the Apps Script → redirects to Stripe Checkout
 assets/js/success.js     Confirms the payment on return and shows "You're in"
@@ -116,8 +118,8 @@ STRIPE_INTEGRATION_TODO.md  This file
 2. `main.js` sends the form to the Apps Script (`action: "checkout"`).
 3. The script logs them in **Checkout started**, then calls `POST /v1/checkout/sessions` with the Checkout Studio parameters, your Price, the success and cancel URLs, their email and a reference ID.
 4. The browser is sent to the session's Stripe-hosted `url`, and the visitor pays.
-5. Stripe redirects to `success.html?session_id=cs_…`. The page asks the script to confirm. The script fetches the session from Stripe, checks it's paid, tagged `showup-waitlist`, $9.99 USD, then adds a **Reservations** row and marks the **Checkout started** row **Paid**.
-6. If someone closes the tab before step 5, the 15-minute sync finds their paid session on Stripe and adds them anyway.
+5. Stripe redirects to `success.html?session_id=cs_…`. The page asks the script to confirm. The script fetches the session from Stripe, checks it's paid, tagged `showup-waitlist`, $9.99 USD, then adds a **Reservations** row, marks the **Checkout started** row **Paid**, and emails them a "You're in" confirmation.
+6. If someone closes the tab before step 5, the 15-minute sync finds their paid session on Stripe, adds them and emails them anyway.
 
 ### Testing (test mode)
 
@@ -129,12 +131,13 @@ Use your **test** secret key and a **test-mode** Price, then reserve on the live
 | `4000 0025 0000 3155` | Asks for 3D Secure authentication |
 | `4000 0000 0000 9995` | Declined (insufficient funds) |
 
-Use any future expiry date, any 3-digit CVC and any ZIP. After a successful payment you should see "You're in", a new **Reservations** row, and the **Checkout started** row marked **Paid**. Test payments show up at https://dashboard.stripe.com/test/payments.
+Use any future expiry date, any 3-digit CVC and any ZIP. After a successful payment you should see "You're in", a new **Reservations** row with **Confirmation email** set to **Sent**, the confirmation in the inbox you paid with, and the **Checkout started** row marked **Paid**. Test payments show up at https://dashboard.stripe.com/test/payments.
 
 ### Next steps
 
 - **Go live:** create the product and Price in live mode, then swap in the live Price ID and live secret key. Redeploy the Apps Script as a new version.
-- **Receipts:** turn on emailed receipts under **Settings → Customer emails → Successful payments**.
+- **Receipts:** the script sends the "You're in" email. For Stripe's own payment receipt as well, turn on **Settings → Customer emails → Successful payments** (Stripe only sends these in live mode).
+- **Confirmation emails:** they come from the Gmail account that owns the script, named "ShowUp". Free Gmail accounts can email 100 people a day; anyone past that shows **Waiting (daily email limit)** in the Sheet and is emailed automatically once the limit resets. To resend one, clear its **Confirmation email** cell and run `sendMissingConfirmationEmails`. Settings are in `CONFIRMATION_EMAIL` in `Code.gs`.
 - **Show-Up Guarantee refunds:** refund the $9.99 from the payment in the Stripe Dashboard. You can find it via the Stripe session ID in the Sheet.
 - **Order tracking:** the **Reservations** tab is your list of paying founding members, with city spot numbers for the Founding 500 cap.
 - **Before taking real money:** add terms, privacy and refund policy pages and link them in the site footer.

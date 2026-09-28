@@ -23,8 +23,8 @@ STRIPE_INTEGRATION_TODO.md  ← setup checklist
 1. A visitor fills in the form (name, email, city, age, interests).
 2. The site sends it to your Apps Script, which logs them in the Sheet's **Checkout started** tab and creates a Stripe Checkout Session.
 3. They pay on Stripe's hosted checkout page. Stripe redirects them to `success.html?session_id=…`.
-4. `success.html` asks the Apps Script to confirm. The script checks with **Stripe directly** that the session is paid, is a ShowUp reservation and is the right amount. It then adds a row to **Reservations** and marks their **Checkout started** row as **Paid**.
-5. If someone closes the tab before step 4, a sync that runs every 15 minutes finds their payment on Stripe and adds them anyway.
+4. `success.html` asks the Apps Script to confirm. The script checks with **Stripe directly** that the session is paid, is a ShowUp reservation and is the right amount. It then adds a row to **Reservations**, marks their **Checkout started** row as **Paid**, and emails them a "You're in" confirmation from your Gmail.
+5. If someone closes the tab before step 4, a sync that runs every 15 minutes finds their payment on Stripe, adds them and emails them anyway.
 
 Your Stripe secret key lives only inside Google Apps Script. It is never in this repo or on the public site.
 
@@ -38,7 +38,7 @@ Your Stripe secret key lives only inside Google Apps Script. It is never in this
 
 **Checkout started:** Started at, Reference, First name, Email, City, Age range, Interests, Status, Page
 
-**Reservations:** Paid at, Reference, First name, Email, City, Age range, Interests, City spot #, Amount, Currency, Stripe session ID, Stripe payment intent, Confirmed by
+**Reservations:** Paid at, Reference, First name, Email, City, Age range, Interests, City spot #, Amount, Currency, Stripe session ID, Stripe payment intent, Confirmed by, Confirmation email
 
 ## Before you take real payments
 

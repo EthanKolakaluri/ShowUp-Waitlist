@@ -13,22 +13,29 @@
  *   2. "Reservations" tab: adds a row ONLY after Stripe confirms the
  *      payment. It asks Stripe directly, so nobody can fake a reservation
  *      by opening the success page by hand.
- *   3. Returns founding-spot counts per city for the website's counter.
- *   4. A 15-minute sync catches anyone who paid but closed the tab before
- *      the success page loaded.
+ *   3. Emails each person a "You're in" confirmation once their payment is
+ *      confirmed (sent from your Gmail; see CONFIRMATION_EMAIL below).
+ *   4. Returns founding-spot counts per city for the website's counter.
+ *   5. A 15-minute sync catches anyone who paid but closed the tab before
+ *      the success page loaded, and sends emails held back by Gmail's
+ *      daily limit.
  *
  * Setup: see STRIPE_INTEGRATION_TODO.md and README.md. In short:
  *   - Paste this file into Extensions → Apps Script in your Google Sheet.
  *   - Project Settings → Script properties → add STRIPE_API_KEY (your Stripe
  *     secret key). GitHub secrets can't reach this script, so it goes here.
- *   - Replace the placeholders in the CONFIG block below, run setup() once,
- *     then deploy as a Web app (Execute as: Me, Who has access: Anyone).
+ *   - Replace the placeholders in the CONFIG block below, run setup() once
+ *     (it asks for permissions), then deploy as a Web app
+ *     (Execute as: Me, Who has access: Anyone).
+ *   - Optional: run sendTestEmail() to see the confirmation email yourself.
  *
  * Security
  *   - Limited to this spreadsheet (@OnlyCurrentDoc above).
  *   - The Stripe key stays in Script properties; nothing here returns it.
  *   - Price, success and cancel URLs are fixed here, never taken from visitors.
  *   - Reservations are only written after Stripe confirms the payment.
+ *   - Emails only go to people Stripe says have paid, so the form can't be
+ *     used to send mail to strangers. Names and cities are escaped.
  *   - Rate limits (RATE_LIMITS below) stop spam from filling the Sheet or
  *     using up Google's daily quota for outside requests.
  *   - Stripe error details are logged here, never shown to visitors.
@@ -43,9 +50,9 @@ const CONFIG = {
   // Your Stripe Price ID for the $9.99 reservation (Dashboard → Product catalog).
   STRIPE_PRICE_ID: 'price_...',
   // Where Stripe sends people after paying. Keep {CHECKOUT_SESSION_ID}.
-  SUCCESS_URL: 'https://example.com/success.html?session_id={CHECKOUT_SESSION_ID}',
+  SUCCESS_URL: 'https://ethankolakaluri.github.io/ShowUp-Waitlist/success.html?session_id={CHECKOUT_SESSION_ID}',
   // Where Stripe sends people who click back / cancel.
-  CANCEL_URL: 'https://example.com/#reserve',
+  CANCEL_URL: 'https://ethankolakaluri.github.io/ShowUp-Waitlist/#reserve',
 
   // Must match the Price amount, in cents (9.99 USD = 999).
   // Set to 0 to skip the amount check.
@@ -82,11 +89,24 @@ const CHECKOUT_STUDIO_PARAMS = {
   origin_context: 'mobile_app'
 };
 
+// "You're in" email sent to each person once Stripe confirms their payment.
+// It goes out from the Gmail account that owns this script, with FROM_NAME
+// as the sender name. Free Gmail accounts can email 100 people a day; anyone
+// past that is marked "Waiting" in the Reservations tab and gets their email
+// automatically on the next sync after the limit resets.
+const CONFIRMATION_EMAIL = {
+  ENABLED: true,
+  FROM_NAME: 'ShowUp',
+  // Where replies go. Leave empty to use your own Gmail address.
+  REPLY_TO: ''
+};
+
 // Tag on every session this site creates, so the Sheet only counts ShowUp reservations.
 const APP_TAG = 'showup-waitlist';
 
 const STARTED_HEADERS = ['Started at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'Status', 'Page'];
-const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'City spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by'];
+const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'City spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by', 'Confirmation email'];
+const EMAIL_WAITING = 'Waiting (daily email limit)';
 
 /* =============================================================
    One-time setup — run this once from the Apps Script editor
@@ -99,6 +119,7 @@ function setup() {
   if (!exists) ScriptApp.newTrigger('syncPaidCheckouts').timeBased().everyMinutes(15).create();
 
   Logger.log(getStripeKey_() ? 'Setup done. Stripe key found.' : 'Setup done. Add STRIPE_API_KEY in Project Settings → Script properties.');
+  if (CONFIRMATION_EMAIL.ENABLED) Logger.log('Confirmation emails are on. Gmail lets this script email ' + MailApp.getRemainingDailyQuota() + ' more people today.');
 }
 
 /* =============================================================
@@ -266,13 +287,19 @@ function addReservation_(s, source) {
     String(s.currency || '').toUpperCase(),
     s.id,
     typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent && s.payment_intent.id) || '',
-    source
+    source,
+    CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : ''
   ];
   reservations.appendRow(row);
 
   if (lead) {
     const statusCol = headerIndex_(started, 'Status') + 1;
     started.getRange(lead.row, statusCol).setValue('Paid');
+  }
+
+  if (CONFIRMATION_EMAIL.ENABLED) {
+    const status = sendConfirmation_(rowObject_(reservations, row));
+    setCell_(reservations, reservations.getLastRow(), 'Confirmation email', status);
   }
   return reservationResult_(row, false);
 }
@@ -317,6 +344,7 @@ function countCity_(sheet, city) {
    4. Every-15-minutes sync (set up by setup())
    ============================================================= */
 function syncPaidCheckouts() {
+  if (CONFIRMATION_EMAIL.ENABLED) sendConfirmationEmails_(function (status) { return status === EMAIL_WAITING; });
   if (!getStripeKey_()) return;
   const since = Math.floor(Date.now() / 1000) - CONFIG.SYNC_LOOKBACK_DAYS * 86400;
   let startingAfter = '';
@@ -346,6 +374,206 @@ function syncPaidCheckouts() {
     startingAfter = page.has_more && page.data.length ? page.data[page.data.length - 1].id : '';
     pages++;
   } while (startingAfter && pages < 10);
+}
+
+/* =============================================================
+   5. Confirmation email
+   ============================================================= */
+
+// Run from the editor to see the email yourself (it goes to your own Gmail).
+function sendTestEmail() {
+  const to = Session.getEffectiveUser().getEmail();
+  const status = sendConfirmation_({
+    'Email': to, 'First name': 'Maya', 'City': 'Los Angeles', 'City spot #': 12,
+    'Amount': (CONFIG.EXPECTED_AMOUNT_CENTS || 999) / 100, 'Currency': 'USD',
+    'Reference': 'SU-TEST1234', 'Paid at': new Date()
+  });
+  Logger.log(status.indexOf('Sent') === 0 ? 'Test email sent to ' + to + '. Check your inbox (and spam).' : 'Test email not sent: ' + status);
+}
+
+// Run from the editor to email everyone in Reservations whose
+// "Confirmation email" cell is empty: people who reserved before emails were
+// turned on, or rows where you cleared the cell to send it again.
+function sendMissingConfirmationEmails() {
+  const sent = sendConfirmationEmails_(function (status) { return status === '' || status === EMAIL_WAITING; });
+  Logger.log('Sent ' + sent + ' confirmation email(s).');
+}
+
+// Sends the email for every Reservations row whose status passes shouldSend.
+// Uses its own lock so it never holds up payments being confirmed.
+function sendConfirmationEmails_(shouldSend) {
+  const lock = LockService.getDocumentLock() || LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return 0; // another run is already sending
+  try {
+    const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
+    const col = headerIndex_(sheet, 'Confirmation email');
+    const values = sheet.getDataRange().getValues();
+    let sent = 0;
+    for (let r = 1; r < values.length; r++) {
+      if (!shouldSend(String(values[r][col] || ''))) continue;
+      if (MailApp.getRemainingDailyQuota() < 1) break;
+      const status = sendConfirmation_(rowObject_(sheet, values[r]));
+      sheet.getRange(r + 1, col + 1).setValue(status);
+      if (status.indexOf('Sent') === 0) sent++;
+      if (status === EMAIL_WAITING) break;
+    }
+    return sent;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Sends the email for one reservation (an object keyed by column header) and
+// returns what to write in its "Confirmation email" cell.
+function sendConfirmation_(r) {
+  const to = String(r['Email'] || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return 'Not sent: no valid email';
+  if (MailApp.getRemainingDailyQuota() < 1) return EMAIL_WAITING;
+  try {
+    const msg = confirmationMessage_(r);
+    const options = { to: to, subject: msg.subject, body: msg.text, htmlBody: msg.html, name: CONFIRMATION_EMAIL.FROM_NAME };
+    if (CONFIRMATION_EMAIL.REPLY_TO) options.replyTo = CONFIRMATION_EMAIL.REPLY_TO;
+    MailApp.sendEmail(options);
+    return 'Sent ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  } catch (err) {
+    console.error('Confirmation email failed', err);
+    if (/too many times|quota|limit/i.test(String(err))) return EMAIL_WAITING;
+    return 'Failed: ' + String((err && err.message) || err).slice(0, 120);
+  }
+}
+
+function confirmationMessage_(r) {
+  const site = siteUrl_();
+  const name = String(r['First name'] || '').trim();
+  const city = String(r['City'] || '').trim();
+  const spot = Number(r['City spot #']) || 0;
+  const ref = String(r['Reference'] || '').trim();
+  const currency = String(r['Currency'] || 'USD').toUpperCase();
+  const price = money_(r['Amount'], currency);
+  const paidAt = r['Paid at'] instanceof Date ? r['Paid at'] : new Date();
+  const date = Utilities.formatDate(paidAt, Session.getScriptTimeZone(), 'MMM d, yyyy');
+  const cap = CONFIG.FOUNDING_CAP;
+
+  const hello = name ? "You're in, " + name : "You're in";
+  const subject = spot && city
+    ? hello + '! Founding spot #' + spot + ' in ' + city
+    : hello + '! Your ShowUp spot is reserved';
+  const lead = 'Your founding spot is reserved. Your ' + price + ' also covers your first month after launch, so there\'s nothing else to pay until month two.';
+  const spotLine = spot && city ? 'of ' + cap + ' founding spots in ' + city : '';
+  const steps = [
+    "We'll email you before launch to finish your match quiz.",
+    'At launch, you get your crew and your first AI-planned hangout.',
+    'From month two, Crew is ' + price + '/mo, locked in while you\'re a member.'
+  ];
+  const guarantee = "Go to 3 hangouts in your first 30 days. If you haven't met at least one person you want to see again, we refund your first month in full.";
+  const invite = 'mailto:?subject=' + encodeURIComponent('Come to ShowUp with me') +
+    '&body=' + encodeURIComponent('I just reserved a founding spot on ShowUp. It matches you with a crew and plans the hangouts for you. Grab a spot before they\'re gone: ' + site);
+
+  const text = [
+    hello + '.',
+    '',
+    (spotLine ? 'Spot #' + spot + ' ' + spotLine + '.\n\n' : '') + lead,
+    '',
+    'What happens next',
+    steps.map(function (s, i) { return (i + 1) + '. ' + s; }).join('\n'),
+    '',
+    'The Show-Up Guarantee',
+    guarantee,
+    '',
+    'Paid: ' + price + ' ' + currency,
+    'Date: ' + date,
+    ref ? 'Reference: ' + ref : '',
+    '',
+    "Know someone who'd come along? Send them " + site,
+    '',
+    'Questions? Just reply to this email.',
+    'ShowUp'
+  ].filter(function (line, i, all) { return line !== '' || all[i - 1] !== ''; }).join('\n');
+
+  const F_HEAD = "'Bricolage Grotesque','Helvetica Neue',Helvetica,Arial,sans-serif";
+  const F_BODY = "'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif";
+  const row = function (label, value) {
+    return '<tr><td style="padding:6px 0;font:14px/1.4 ' + F_BODY + ';color:#7A6A5F;">' + esc_(label) + '</td>' +
+      '<td align="right" style="padding:6px 0;font:600 14px/1.4 ' + F_BODY + ';color:#2B211C;">' + esc_(value) + '</td></tr>';
+  };
+
+  const html = '<!doctype html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only">' +
+    '<title>' + esc_(subject) + '</title>' +
+    '<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">' +
+    '</head><body style="margin:0;padding:0;background:#FBF6EE;">' +
+    '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">' + esc_(spotLine ? 'Spot #' + spot + ' ' + spotLine + '. ' + lead : lead) + '</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBF6EE;"><tr><td align="center" style="padding:32px 16px;">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">' +
+
+    // Logo
+    '<tr><td style="padding:0 4px 20px;"><a href="' + esc_(site) + '" style="text-decoration:none;">' +
+    '<img src="' + esc_(site + 'assets/img/email-logo.png') + '" width="132" alt="showup" style="display:block;border:0;width:132px;height:auto;font:800 28px ' + F_HEAD + ';color:#2B211C;"></a></td></tr>' +
+
+    // Card
+    '<tr><td style="background:#FFFDF9;border:1px solid #F0E4D7;border-radius:24px;padding:36px 32px;">' +
+    '<p style="margin:0 0 14px;"><span style="display:inline-block;background:#FFE4D9;color:#C8401C;border-radius:999px;padding:5px 12px;font:600 12px/1 ' + F_BODY + ';letter-spacing:.08em;text-transform:uppercase;">Founding ' + esc_(cap) + '</span></p>' +
+    '<h1 style="margin:0 0 12px;font:800 34px/1.1 ' + F_HEAD + ';color:#2B211C;letter-spacing:-.02em;">' + esc_(hello) + '.</h1>' +
+    '<p style="margin:0 0 24px;font:16px/1.6 ' + F_BODY + ';color:#5C4F46;">' + esc_(lead) + '</p>' +
+
+    (spotLine
+      ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFF0E8;border-radius:18px;margin:0 0 28px;"><tr>' +
+        '<td width="1" style="padding:18px 6px 18px 22px;font:800 44px/1 ' + F_HEAD + ';color:#FF5B35;white-space:nowrap;">#' + esc_(spot) + '</td>' +
+        '<td style="padding:18px 22px 18px 10px;font:600 15px/1.4 ' + F_BODY + ';color:#2B211C;">' + esc_(spotLine) + '</td>' +
+        '</tr></table>'
+      : '') +
+
+    '<h2 style="margin:0 0 12px;font:800 18px/1.3 ' + F_HEAD + ';color:#2B211C;">What happens next</h2>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;">' +
+    steps.map(function (s, i) {
+      return '<tr><td width="36" valign="top" style="padding:0 0 12px;">' +
+        '<div style="width:26px;height:26px;border-radius:13px;background:#FF5B35;color:#FFFDF9;text-align:center;font:800 13px/26px ' + F_HEAD + ';">' + (i + 1) + '</div></td>' +
+        '<td valign="top" style="padding:3px 0 12px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">' + esc_(s) + '</td></tr>';
+    }).join('') +
+    '</table>' +
+
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:4px solid #FF5B35;margin:0 0 26px;"><tr><td style="padding:2px 0 2px 16px;">' +
+    '<p style="margin:0 0 4px;font:800 16px/1.3 ' + F_HEAD + ';color:#2B211C;">The Show-Up Guarantee</p>' +
+    '<p style="margin:0;font:14px/1.55 ' + F_BODY + ';color:#5C4F46;">' + esc_(guarantee) + '</p>' +
+    '</td></tr></table>' +
+
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #F0E4D7;border-bottom:1px solid #F0E4D7;margin:0 0 28px;">' +
+    '<tr><td colspan="2" style="height:8px;line-height:8px;font-size:0;">&nbsp;</td></tr>' +
+    row('Paid', price + ' ' + currency) + row('Date', date) + (ref ? row('Reference', ref) : '') +
+    '<tr><td colspan="2" style="height:8px;line-height:8px;font-size:0;">&nbsp;</td></tr>' +
+    '</table>' +
+
+    '<p style="margin:0 0 10px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">Know someone who\'d come along?</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#C8401C;border-radius:999px;">' +
+    '<a href="' + esc_(invite) + '" style="display:inline-block;padding:13px 24px;font:600 15px/1 ' + F_BODY + ';color:#FFFDF9;text-decoration:none;">Invite a friend</a>' +
+    '</td></tr></table>' +
+    '</td></tr>' +
+
+    // Footer
+    '<tr><td style="padding:22px 4px 0;font:13px/1.6 ' + F_BODY + ';color:#7A6A5F;">' +
+    'Questions? Just reply to this email.<br>' +
+    'You\'re getting this because you reserved a founding spot at <a href="' + esc_(site) + '" style="color:#C8401C;">ShowUp</a>.' +
+    '</td></tr>' +
+    '</table></td></tr></table></body></html>';
+
+  return { subject: subject, text: text, html: html };
+}
+
+// The site's home page, taken from CANCEL_URL (…/ShowUp-Waitlist/#reserve → …/ShowUp-Waitlist/).
+function siteUrl_() {
+  const base = String(CONFIG.CANCEL_URL || '').split('#')[0].split('?')[0];
+  return /\/$/.test(base) ? base : base.replace(/\/[^\/]*\.html$/, '') + '/';
+}
+
+function money_(amount, currency) {
+  const n = (Number(amount) || 0).toFixed(2);
+  return String(currency || 'USD').toUpperCase() === 'USD' ? '$' + n : n;
+}
+
+function esc_(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 /* =============================================================
@@ -391,8 +619,20 @@ function getSheet_(name, headers) {
     sheet.appendRow(headers);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
     sheet.setFrozenRows(1);
+  } else {
+    // Tabs made by an older version of this script: add any new columns at the end.
+    const have = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const missing = headers.filter(function (h) { return have.indexOf(h) < 0; });
+    if (missing.length) {
+      sheet.getRange(1, sheet.getLastColumn() + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+    }
   }
   return sheet;
+}
+
+function setCell_(sheet, row, header, value) {
+  const col = headerIndex_(sheet, header);
+  if (col > -1) sheet.getRange(row, col + 1).setValue(value);
 }
 
 function headerIndex_(sheet, header) {
