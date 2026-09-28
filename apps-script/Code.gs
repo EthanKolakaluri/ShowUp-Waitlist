@@ -2,8 +2,9 @@
  * ShowUp waitlist — Google Sheets backend (Google Apps Script)
  * ---------------------------------------------------------------
  * What it does
- *   1. "Checkout started" tab: logs everyone who submits the form,
- *      before they pay (useful for following up on abandoned checkouts).
+ *   1. Creates the Stripe Checkout Session when someone submits the form,
+ *      and logs them in the "Checkout started" tab (useful for following
+ *      up on abandoned checkouts).
  *   2. "Reservations" tab: adds a row ONLY after Stripe confirms the
  *      payment. It asks Stripe directly, so nobody can fake a reservation
  *      by opening the success page by hand.
@@ -11,19 +12,25 @@
  *   4. A 15-minute sync catches anyone who paid but closed the tab before
  *      the success page loaded.
  *
- * Setup: see README.md, step 2. In short:
+ * Setup: see STRIPE_INTEGRATION_TODO.md and README.md. In short:
  *   - Paste this file into Extensions → Apps Script in your Google Sheet.
  *   - Project Settings → Script properties → add STRIPE_SECRET_KEY.
- *   - Fill in the CONFIG block below, run setup() once, then deploy as a
- *     Web app (Execute as: Me, Who has access: Anyone).
+ *   - Replace the placeholders in the CONFIG block below, run setup() once,
+ *     then deploy as a Web app (Execute as: Me, Who has access: Anyone).
  */
 
 const CONFIG = {
-  // Your Stripe Payment Link ID (starts with "plink_"). Leave empty until you
-  // have it. Needed for the 15-minute sync and recommended for security.
-  PAYMENT_LINK_ID: '',
+  // ---- Stripe Checkout (placeholders: see STRIPE_INTEGRATION_TODO.md) ----
+  // "payment" = one-time charge (the $9.99 reservation).
+  MODE: 'payment',
+  // Your Stripe Price ID for the $9.99 reservation (Dashboard → Product catalog).
+  STRIPE_PRICE_ID: 'price_...',
+  // Where Stripe sends people after paying. Keep {CHECKOUT_SESSION_ID}.
+  SUCCESS_URL: 'https://example.com/success.html?session_id={CHECKOUT_SESSION_ID}',
+  // Where Stripe sends people who click back / cancel.
+  CANCEL_URL: 'https://example.com/#reserve',
 
-  // Must match the Payment Link price, in cents (9.99 USD = 999).
+  // Must match the Price amount, in cents (9.99 USD = 999).
   // Set to 0 to skip the amount check.
   EXPECTED_AMOUNT_CENTS: 999,
   EXPECTED_CURRENCY: 'usd',
@@ -37,6 +44,25 @@ const CONFIG = {
   STARTED_SHEET: 'Checkout started',
   RESERVATIONS_SHEET: 'Reservations'
 };
+
+// Configured in Stripe Checkout Studio — use exactly as set there.
+// ui_mode: 'hosted_page' is the name in newer Stripe API versions; accounts on an
+// older default API version use 'hosted' (see STRIPE_INTEGRATION_TODO.md).
+const CHECKOUT_STUDIO_PARAMS = {
+  ui_mode: 'hosted_page',
+  billing_address_collection: 'auto',
+  'phone_number_collection[enabled]': 'false',
+  'automatic_tax[enabled]': 'false',
+  allow_promotion_codes: 'false',
+  submit_type: 'auto',
+  integration_identifier: 'hosted_mobile_app_0002',
+  origin_context: 'mobile_app'
+};
+// payment_method_collection ('always') is set only when MODE is 'subscription'.
+const CHECKOUT_STUDIO_SUBSCRIPTION_PARAMS = { payment_method_collection: 'always' };
+
+// Tag on every session this site creates, so the Sheet only counts ShowUp reservations.
+const APP_TAG = 'showup-waitlist';
 
 const STARTED_HEADERS = ['Started at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'Status', 'Page'];
 const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'City spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by'];
@@ -72,6 +98,7 @@ function doPost(e) {
     return json_({ ok: false, error: 'bad_json' });
   }
   try {
+    if (body.action === 'checkout') return json_(createCheckout_(body));
     if (body.action === 'start') return json_(recordStart_(body));
     if (body.action === 'confirm') return json_(confirmSession_(String(body.session_id || ''), 'Success page'));
     return json_({ ok: false, error: 'unknown_action' });
@@ -113,6 +140,47 @@ function recordStart_(b) {
 }
 
 /* =============================================================
+   1b. Create the Stripe Checkout Session
+   ============================================================= */
+function createCheckout_(b) {
+  if (!getStripeKey_()) return { ok: false, error: 'server_not_configured' };
+  if (!isCheckoutConfigured_()) return { ok: false, error: 'checkout_not_configured' };
+
+  const started = recordStart_(b);
+  if (!started.ok) return started;
+
+  const params = {
+    mode: CONFIG.MODE,
+    success_url: CONFIG.SUCCESS_URL,
+    cancel_url: CONFIG.CANCEL_URL,
+    'line_items[0][price]': CONFIG.STRIPE_PRICE_ID,
+    'line_items[0][quantity]': '1',
+    client_reference_id: started.ref,
+    customer_email: String(b.email || '').trim(),
+    'metadata[app]': APP_TAG,
+    'metadata[ref]': started.ref
+  };
+  Object.keys(CHECKOUT_STUDIO_PARAMS).forEach(function (k) { params[k] = CHECKOUT_STUDIO_PARAMS[k]; });
+  if (CONFIG.MODE === 'subscription') {
+    Object.keys(CHECKOUT_STUDIO_SUBSCRIPTION_PARAMS).forEach(function (k) { params[k] = CHECKOUT_STUDIO_SUBSCRIPTION_PARAMS[k]; });
+  }
+
+  const session = stripePost_('/v1/checkout/sessions', params);
+  if (!session || session.error || !session.url) {
+    console.error('Stripe Checkout Session create failed', session && session.error);
+    return { ok: false, error: 'stripe_error', message: (session && session.error && session.error.message) || '' };
+  }
+  return { ok: true, ref: started.ref, url: session.url };
+}
+
+function isCheckoutConfigured_() {
+  const placeholder = /\.\.\.|example\.com/;
+  return !placeholder.test(CONFIG.STRIPE_PRICE_ID) && /^price_/.test(CONFIG.STRIPE_PRICE_ID) &&
+    !placeholder.test(CONFIG.SUCCESS_URL) && CONFIG.SUCCESS_URL.indexOf('{CHECKOUT_SESSION_ID}') > -1 &&
+    !placeholder.test(CONFIG.CANCEL_URL);
+}
+
+/* =============================================================
    2. Confirm a paid Stripe Checkout Session → Reservations
    ============================================================= */
 function confirmSession_(sessionId, source) {
@@ -139,7 +207,7 @@ function confirmSession_(sessionId, source) {
 function validateSession_(s) {
   if (!s || s.error) return { ok: false, error: 'not_found' };
   if (s.payment_status !== 'paid') return { ok: false, error: 'not_paid' };
-  if (CONFIG.PAYMENT_LINK_ID && s.payment_link !== CONFIG.PAYMENT_LINK_ID) return { ok: false, error: 'wrong_payment_link' };
+  if (!s.metadata || s.metadata.app !== APP_TAG) return { ok: false, error: 'not_showup_session' };
   if (CONFIG.EXPECTED_AMOUNT_CENTS && s.amount_total !== CONFIG.EXPECTED_AMOUNT_CENTS) return { ok: false, error: 'wrong_amount' };
   if (CONFIG.EXPECTED_CURRENCY && String(s.currency || '').toLowerCase() !== CONFIG.EXPECTED_CURRENCY) return { ok: false, error: 'wrong_currency' };
   return { ok: true };
@@ -223,14 +291,13 @@ function countCity_(sheet, city) {
    4. Every-15-minutes sync (set up by setup())
    ============================================================= */
 function syncPaidCheckouts() {
-  if (!CONFIG.PAYMENT_LINK_ID || !getStripeKey_()) return;
+  if (!getStripeKey_()) return;
   const since = Math.floor(Date.now() / 1000) - CONFIG.SYNC_LOOKBACK_DAYS * 86400;
   let startingAfter = '';
   let pages = 0;
 
   do {
     let path = '/v1/checkout/sessions?limit=100&status=complete' +
-      '&payment_link=' + encodeURIComponent(CONFIG.PAYMENT_LINK_ID) +
       '&created[gte]=' + since;
     if (startingAfter) path += '&starting_after=' + encodeURIComponent(startingAfter);
 
@@ -238,7 +305,7 @@ function syncPaidCheckouts() {
     if (!page || page.error || !Array.isArray(page.data)) return;
 
     page.data.forEach(function (s) {
-      if (s.payment_status !== 'paid') return;
+      if (s.payment_status !== 'paid' || !s.metadata || s.metadata.app !== APP_TAG) return;
       const lock = LockService.getScriptLock();
       lock.waitLock(20000);
       try {
@@ -266,6 +333,21 @@ function stripeGet_(path) {
   const res = UrlFetchApp.fetch('https://api.stripe.com' + path, {
     method: 'get',
     headers: { Authorization: 'Bearer ' + getStripeKey_() },
+    muteHttpExceptions: true
+  });
+  let data = {};
+  try { data = JSON.parse(res.getContentText()); } catch (err) { data = {}; }
+  if (res.getResponseCode() !== 200) return { error: data.error || { message: 'HTTP ' + res.getResponseCode() } };
+  return data;
+}
+
+// Form-encoded POST to the Stripe API. No Stripe-Version header: the account's
+// default API version is used.
+function stripePost_(path, params) {
+  const res = UrlFetchApp.fetch('https://api.stripe.com' + path, {
+    method: 'post',
+    headers: { Authorization: 'Bearer ' + getStripeKey_() },
+    payload: params,
     muteHttpExceptions: true
   });
   let data = {};
