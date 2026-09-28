@@ -31,7 +31,21 @@
       method: "POST",
       body: JSON.stringify(payload),
       redirect: "follow"
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) {
+      return r.text().then(function (text) {
+        try { return JSON.parse(text); }
+        catch (e) {
+          console.error("[ShowUp] The Apps Script answered with a web page instead of data (HTTP " + r.status + "). " +
+            "Check the deployment: Execute as Me, Who has access: Anyone.", text.slice(0, 300));
+          return null;
+        }
+      });
+    }).catch(function (err) {
+      console.error("[ShowUp] Couldn't reach the Apps Script web app. Most often the deployment's " +
+        "'Who has access' isn't set to Anyone, so Google shows a sign-in page. Open SHEETS_WEB_APP_URL + '?action=counts' " +
+        "in a private window: it should show {\"ok\":true,...}.", err);
+      return null;
+    });
   }
 
   function makeRef() {
@@ -289,6 +303,7 @@
           return;
         }
         stopLoading(btn);
+        if (res) console.error("[ShowUp] Checkout failed:", res.error || res);
         showFormError(checkoutErrorMessage(res));
       });
     });
