@@ -15,13 +15,13 @@ window.SHOWUP_CONFIG = {
 
   // Where people can reach you (shown in the footer, on errors and in the
   // Terms, Privacy and Refund policy pages).
-  CONTACT_EMAIL: "",
+  CONTACT_EMAIL: "showup128@gmail.com",
 
   // Used in the Terms, Privacy and Refund policy pages.
   // Your business's legal name (or your own full name if you haven't
   // formed a company yet), and the US state whose laws apply.
-  LEGAL_NAME: "",
-  GOVERNING_STATE: "",
+  LEGAL_NAME: "Ethan Kolakaluri, founder of ShowUp",
+  GOVERNING_STATE: "Washington",
 
   // Price shown on the page. Must match your Stripe Price.
   PRICE_LABEL: "$9.99",

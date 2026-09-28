@@ -114,7 +114,7 @@ const CONFIRMATION_EMAIL = {
   ENABLED: true,
   FROM_NAME: 'ShowUp',
   // Where replies go. Leave empty to use your own Gmail address.
-  REPLY_TO: ''
+  REPLY_TO: 'showup128@gmail.com'
 };
 
 // Tag on every session this site creates, so the Sheet only counts ShowUp reservations.
