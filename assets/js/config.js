@@ -11,7 +11,7 @@ window.SHOWUP_CONFIG = {
   // This one URL creates the Stripe Checkout, confirms payments and writes
   // to your Google Sheet.
   // Looks like: "https://script.google.com/macros/s/xxxxxxxx/exec"
-  SHEETS_WEB_APP_URL: "",
+  SHEETS_WEB_APP_URL: "https://script.google.com/macros/s/AKfycbxguxZi3bknVVr6KeDVV8QBTxEiAopRP3J3dk9AaJ8ivSBafdfVF1J5OxmwMN8bd03T/exec",
 
   // Where people can reach you (shown in the footer and on errors).
   CONTACT_EMAIL: "",
