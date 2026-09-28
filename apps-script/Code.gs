@@ -15,7 +15,8 @@
  *      by opening the success page by hand.
  *   3. Emails each person a "You're in" confirmation once their payment is
  *      confirmed (sent from your Gmail; see CONFIRMATION_EMAIL below).
- *   4. Returns founding-spot counts per city for the website's counter.
+ *   4. Tells the website how many of the 500 founding spots are left, and
+ *      stops new checkouts once they're all taken.
  *   5. Refunds: people can refund themselves before launch from a private
  *      link in their email or on the success page, and you can refund anyone
  *      from the ShowUp menu in the Sheet. Each refund is made in Stripe,
@@ -39,7 +40,7 @@
  *   - Price, success and cancel URLs are fixed here, never taken from visitors.
  *   - Reservations are only written after Stripe confirms the payment.
  *   - Emails only go to people Stripe says have paid, so the form can't be
- *     used to send mail to strangers. Names and cities are escaped.
+ *     used to send mail to strangers. Names are escaped.
  *   - Refund links are signed with a secret kept in Script properties
  *     (REFUND_SECRET, created by setup()), so nobody can refund someone else
  *     by guessing a reference. Stripe is sent an idempotency key, so a
@@ -67,7 +68,7 @@ const CONFIG = {
   EXPECTED_AMOUNT_CENTS: 999,
   EXPECTED_CURRENCY: 'usd',
 
-  // Founding spots per city (keep in sync with assets/js/config.js).
+  // Founding spots in total (keep in sync with assets/js/config.js).
   FOUNDING_CAP: 500,
 
   // How far back the sync looks for paid checkouts, in days.
@@ -119,9 +120,9 @@ const CONFIRMATION_EMAIL = {
 // Tag on every session this site creates, so the Sheet only counts ShowUp reservations.
 const APP_TAG = 'showup-waitlist';
 
-const STARTED_HEADERS = ['Started at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'Status', 'Page'];
-const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'City spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by', 'Confirmation email', 'Refunded at', 'Refunded by'];
-const REFUND_HEADERS = ['Refunded at', 'Reference', 'First name', 'Email', 'City', 'City spot #', 'Amount', 'Currency', 'Stripe refund ID', 'Stripe payment intent', 'Refunded by', 'Refund email'];
+const STARTED_HEADERS = ['Started at', 'Reference', 'First name', 'Email', 'Age range', 'Interests', 'Status', 'Page'];
+const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'Age range', 'Interests', 'Spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by', 'Confirmation email', 'Refunded at', 'Refunded by'];
+const REFUND_HEADERS = ['Refunded at', 'Reference', 'First name', 'Email', 'Spot #', 'Amount', 'Currency', 'Stripe refund ID', 'Stripe payment intent', 'Refunded by', 'Refund email'];
 const EMAIL_WAITING = 'Waiting (daily email limit)';
 
 /* =============================================================
@@ -189,17 +190,16 @@ function recordStart_(b) {
   try {
     const sheet = getSheet_(CONFIG.STARTED_SHEET, STARTED_HEADERS);
     if (findRow_(sheet, 'Reference', ref)) return { ok: true, ref: ref, duplicate: true };
-    sheet.appendRow([
-      new Date(),
-      ref,
-      clean_(b.firstName, 60),
-      clean_(email, 254),
-      clean_(b.city, 80),
-      clean_(b.age, 10),
-      clean_(b.interests, 300),
-      'Checkout started',
-      clean_(b.page, 300)
-    ]);
+    appendRecord_(sheet, {
+      'Started at': new Date(),
+      'Reference': ref,
+      'First name': clean_(b.firstName, 60),
+      'Email': clean_(email, 254),
+      'Age range': clean_(b.age, 10),
+      'Interests': clean_(b.interests, 300),
+      'Status': 'Checkout started',
+      'Page': clean_(b.page, 300)
+    });
     return { ok: true, ref: ref };
   } finally {
     lock.releaseLock();
@@ -219,6 +219,7 @@ function createCheckout_(b) {
       rateLimited_('email:' + hash_(email), RATE_LIMITS.CHECKOUTS_PER_EMAIL_PER_HOUR, 3600)) {
     return { ok: false, error: 'rate_limited' };
   }
+  if (activeReservations_() >= CONFIG.FOUNDING_CAP) return { ok: false, error: 'sold_out' };
 
   const started = recordStart_(b);
   if (!started.ok) return started;
@@ -263,7 +264,7 @@ function confirmSession_(sessionId, source) {
   try {
     const reservations = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
     const existing = findRow_(reservations, 'Stripe session ID', sessionId);
-    if (existing) return reservationResult_(existing.values, true);
+    if (existing) return reservationResult_(rowObject_(reservations, existing.values), true);
 
     const session = stripeGet_('/v1/checkout/sessions/' + encodeURIComponent(sessionId));
     const check = validateSession_(session);
@@ -295,28 +296,23 @@ function addReservation_(s, source) {
 
   const firstName = leadData['First name'] || firstWord_(details.name);
   const email = details.email || leadData['Email'] || '';
-  const city = leadData['City'] || '';
-  const spot = city ? countCity_(reservations, city) + 1 : '';
 
-  const row = [
-    new Date((s.created || Math.floor(Date.now() / 1000)) * 1000),
-    ref,
-    clean_(firstName, 60),
-    clean_(email, 254),
-    clean_(city, 80),
-    clean_(leadData['Age range'], 10),
-    clean_(leadData['Interests'], 300),
-    spot,
-    (Number(s.amount_total) || 0) / 100,
-    String(s.currency || '').toUpperCase(),
-    s.id,
-    typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent && s.payment_intent.id) || '',
-    source,
-    CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : '',
-    '',
-    ''
-  ];
-  reservations.appendRow(row);
+  const record = {
+    'Paid at': new Date((s.created || Math.floor(Date.now() / 1000)) * 1000),
+    'Reference': ref,
+    'First name': clean_(firstName, 60),
+    'Email': clean_(email, 254),
+    'Age range': clean_(leadData['Age range'], 10),
+    'Interests': clean_(leadData['Interests'], 300),
+    'Spot #': countReservations_(reservations) + 1,
+    'Amount': (Number(s.amount_total) || 0) / 100,
+    'Currency': String(s.currency || '').toUpperCase(),
+    'Stripe session ID': s.id,
+    'Stripe payment intent': typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent && s.payment_intent.id) || '',
+    'Confirmed by': source,
+    'Confirmation email': CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : ''
+  };
+  appendRecord_(reservations, record);
 
   if (lead) {
     const statusCol = headerIndex_(started, 'Status') + 1;
@@ -324,29 +320,28 @@ function addReservation_(s, source) {
   }
 
   if (CONFIRMATION_EMAIL.ENABLED) {
-    const status = sendConfirmation_(rowObject_(reservations, row));
+    const status = sendConfirmation_(record);
     setCell_(reservations, reservations.getLastRow(), 'Confirmation email', status);
   }
-  return reservationResult_(row, false);
+  return reservationResult_(record, false);
 }
 
-function reservationResult_(values, already) {
-  const i = function (h) { return RESERVATION_HEADERS.indexOf(h); };
-  const ref = values[i('Reference')] || '';
-  const refunded = !!values[i('Refunded at')];
+// r: a Reservations row as an object keyed by column header.
+function reservationResult_(r, already) {
+  const ref = String(r['Reference'] || '');
+  const refunded = !!r['Refunded at'];
   const result = {
     ok: true,
     already: already,
     ref: ref,
-    firstName: values[i('First name')] || '',
-    city: values[i('City')] || '',
-    spot: values[i('City spot #')] || '',
+    firstName: String(r['First name'] || ''),
+    spot: r['Spot #'] || '',
     cap: CONFIG.FOUNDING_CAP,
     refunded: refunded
   };
   // The private refund link for this person, shown on the success page.
   if (CONFIG.SELF_SERVE_REFUNDS && ref && !refunded) {
-    result.refundToken = refundToken_(ref, values[i('Stripe session ID')]);
+    result.refundToken = refundToken_(ref, r['Stripe session ID']);
   }
   return result;
 }
@@ -355,27 +350,21 @@ function reservationResult_(values, already) {
    3. Founding spot counts for the website
    ============================================================= */
 function getCounts_() {
-  const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
-  const cityCol = headerIndex_(sheet, 'City');
-  const refundedCol = headerIndex_(sheet, 'Refunded at');
-  // Refunded reservations don't hold a spot.
-  const values = sheet.getDataRange().getValues().slice(1).filter(function (r) { return !r[refundedCol]; });
-  const cities = {};
-  values.forEach(function (r) {
-    const c = String(r[cityCol] || '').trim();
-    if (c) cities[c] = (cities[c] || 0) + 1;
-  });
-  return { ok: true, cap: CONFIG.FOUNDING_CAP, cities: cities, total: values.length };
+  const taken = activeReservations_();
+  return { ok: true, cap: CONFIG.FOUNDING_CAP, total: taken, left: Math.max(0, CONFIG.FOUNDING_CAP - taken) };
 }
 
-// Spot numbers count every reservation in the city, refunded ones too, so
-// no two people are ever given the same number.
-function countCity_(sheet, city) {
-  const cityCol = headerIndex_(sheet, 'City');
-  const target = String(city).trim().toLowerCase();
-  return sheet.getDataRange().getValues().slice(1).filter(function (r) {
-    return String(r[cityCol] || '').trim().toLowerCase() === target;
-  }).length;
+// Reservations holding a spot right now (refunded ones don't).
+function activeReservations_() {
+  const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
+  const refundedCol = headerIndex_(sheet, 'Refunded at');
+  return sheet.getDataRange().getValues().slice(1).filter(function (r) { return !(refundedCol > -1 && r[refundedCol]); }).length;
+}
+
+// Spot numbers count every reservation, refunded ones too, so no two people
+// are ever given the same number.
+function countReservations_(sheet) {
+  return Math.max(0, sheet.getLastRow() - 1);
 }
 
 /* =============================================================
@@ -427,7 +416,7 @@ function syncPaidCheckouts() {
 function sendTestEmail() {
   const to = Session.getEffectiveUser().getEmail();
   const status = sendConfirmation_({
-    'Email': to, 'First name': 'Maya', 'City': 'Los Angeles', 'City spot #': 12,
+    'Email': to, 'First name': 'Maya', 'Spot #': 12,
     'Amount': (CONFIG.EXPECTED_AMOUNT_CENTS || 999) / 100, 'Currency': 'USD',
     'Reference': 'SU-TEST1234', 'Stripe session ID': 'cs_test_sample', 'Paid at': new Date()
   });
@@ -521,8 +510,7 @@ function sendMail_(address, build) {
 function confirmationMessage_(r) {
   const site = siteUrl_();
   const name = String(r['First name'] || '').trim();
-  const city = String(r['City'] || '').trim();
-  const spot = Number(r['City spot #']) || 0;
+  const spot = Number(r['Spot #']) || 0;
   const ref = String(r['Reference'] || '').trim();
   const currency = String(r['Currency'] || 'USD').toUpperCase();
   const price = money_(r['Amount'], currency);
@@ -530,11 +518,11 @@ function confirmationMessage_(r) {
   const cap = CONFIG.FOUNDING_CAP;
 
   const hello = name ? "You're in, " + name : "You're in";
-  const subject = spot && city
-    ? hello + '! Founding spot #' + spot + ' in ' + city
+  const subject = spot
+    ? hello + '! Founding spot #' + spot + ' of ' + cap
     : hello + '! Your ShowUp spot is reserved';
   const lead = 'Your founding spot is reserved. Your ' + price + ' also covers your first month after launch, so there\'s nothing else to pay until month two.';
-  const spotLine = spot && city ? 'of ' + cap + ' founding spots in ' + city : '';
+  const spotLine = spot ? 'of ' + cap + ' founding spots' : '';
   const steps = [
     "We'll email you before launch to finish your match quiz.",
     'At launch, you get your crew and your first AI-planned hangout.',
@@ -613,8 +601,7 @@ function confirmationMessage_(r) {
 function refundMessage_(r, refund) {
   const site = siteUrl_();
   const name = String(r['First name'] || '').trim();
-  const city = String(r['City'] || '').trim();
-  const spot = Number(r['City spot #']) || 0;
+  const spot = Number(r['Spot #']) || 0;
   const ref = String(r['Reference'] || '').trim();
   const currency = String((refund && refund.currency) || r['Currency'] || 'USD').toUpperCase();
   const amount = refund && refund.amount ? refund.amount / 100 : r['Amount'];
@@ -623,7 +610,7 @@ function refundMessage_(r, refund) {
   const subject = 'Your ShowUp reservation is refunded';
   const heading = name ? 'Your refund is on its way, ' + name + '.' : 'Your refund is on its way.';
   const lead = "We've refunded " + price + ' to the card you paid with. It usually shows up in 5–10 business days, depending on your bank.';
-  const released = spot && city ? 'Founding spot #' + spot + ' in ' + city + ' has been released.' : 'Your founding spot has been released.';
+  const released = spot ? 'Founding spot #' + spot + ' has been released.' : 'Your founding spot has been released.';
 
   const text = [
     heading,
@@ -763,7 +750,7 @@ function refundSelectedReservation() {
     ui.alert('Already refunded', who + ' was refunded on ' + formatDay_(r['Refunded at']) + '.', ui.ButtonSet.OK);
     return;
   }
-  const where = r['City'] ? ', founding spot #' + r['City spot #'] + ' in ' + r['City'] : '';
+  const where = r['Spot #'] ? ', founding spot #' + r['Spot #'] : '';
   const answer = ui.alert(
     'Refund ' + money_(r['Amount'], r['Currency']) + '?',
     who + where + '.\n\nThis refunds their payment in Stripe, frees their founding spot and emails them.',
@@ -789,8 +776,7 @@ function refundStatus_(ref, t) {
     status: r['Refunded at'] ? 'refunded' : 'active',
     refundsOpen: !!CONFIG.SELF_SERVE_REFUNDS,
     firstName: String(r['First name'] || ''),
-    city: String(r['City'] || ''),
-    spot: r['City spot #'] || '',
+    spot: r['Spot #'] || '',
     amount: Number(r['Amount']) || 0,
     currency: String(r['Currency'] || 'USD').toUpperCase(),
     refundedAt: r['Refunded at'] ? formatDay_(r['Refunded at']) : ''
@@ -864,25 +850,24 @@ function recordRefund_(sheet, rowNumber, r, refund, by) {
   if (lead) setCell_(started, lead.row, 'Status', 'Refunded');
 
   const log = getSheet_(CONFIG.REFUNDS_SHEET, REFUND_HEADERS);
-  log.appendRow(refundLogRow_(now, r, refund, by, CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : ''));
+  appendRecord_(log, refundRecord_(now, r, refund, by, CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : ''));
   if (CONFIRMATION_EMAIL.ENABLED) setCell_(log, log.getLastRow(), 'Refund email', sendRefundEmail_(r, refund));
 }
 
-function refundLogRow_(when, r, refund, by, emailStatus) {
-  return [
-    when,
-    clean_(r['Reference'], 20),
-    clean_(r['First name'], 60),
-    clean_(r['Email'], 254),
-    clean_(r['City'], 80),
-    r['City spot #'] || '',
-    (Number(refund.amount) || 0) / 100,
-    String(refund.currency || r['Currency'] || '').toUpperCase(),
-    clean_(refund.id, 60),
-    clean_(refund.payment_intent || r['Stripe payment intent'], 60),
-    by,
-    emailStatus
-  ];
+function refundRecord_(when, r, refund, by, emailStatus) {
+  return {
+    'Refunded at': when,
+    'Reference': clean_(r['Reference'], 20),
+    'First name': clean_(r['First name'], 60),
+    'Email': clean_(r['Email'], 254),
+    'Spot #': r['Spot #'] || '',
+    'Amount': (Number(refund.amount) || 0) / 100,
+    'Currency': String(refund.currency || r['Currency'] || '').toUpperCase(),
+    'Stripe refund ID': clean_(refund.id, 60),
+    'Stripe payment intent': clean_(refund.payment_intent || r['Stripe payment intent'], 60),
+    'Refunded by': by,
+    'Refund email': emailStatus
+  };
 }
 
 // Part of the 15-minute sync: records refunds you made in the Stripe
@@ -916,7 +901,7 @@ function syncRefunds_() {
           recordRefund_(sheet, found.row, r, refund, 'Stripe Dashboard');
         } else {
           // Partial refund: log it, but they keep their spot.
-          log.appendRow(refundLogRow_(new Date(), r, refund, 'Stripe Dashboard (partial, spot kept)', 'Not sent (partial refund)'));
+          appendRecord_(log, refundRecord_(new Date(), r, refund, 'Stripe Dashboard (partial, spot kept)', 'Not sent (partial refund)'));
         }
       } finally {
         lock.releaseLock();
@@ -1020,6 +1005,13 @@ function getSheet_(name, headers) {
     }
   }
   return sheet;
+}
+
+// Appends a row by column name, so each value lands under the right header
+// even if the tab has extra, missing or rearranged columns.
+function appendRecord_(sheet, record) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  sheet.appendRow(headers.map(function (h) { return Object.prototype.hasOwnProperty.call(record, h) ? record[h] : ''; }));
 }
 
 function setCell_(sheet, row, header, value) {

@@ -73,8 +73,8 @@
     $("#confirm-lead").textContent = "You'll get " + price + " back on the card you paid with.";
     var list = $("#confirm-facts");
     list.textContent = "";
-    addFact(list, d.spot && isSet(d.city)
-      ? "Founding spot #" + d.spot + " in " + d.city + " goes to the next person."
+    addFact(list, d.spot
+      ? "Founding spot #" + d.spot + " goes to the next person."
       : "Your founding spot goes to the next person.");
     addFact(list, "You give up the founding price of " + price + "/mo, locked in for members.");
     addFact(list, "Refunds usually show up in 5–10 business days.");

@@ -27,15 +27,6 @@ window.SHOWUP_CONFIG = {
   PRICE_LABEL: "$9.99",
   REGULAR_PRICE_LABEL: "$14.99",
 
-  // Founding spots per city.
-  FOUNDING_CAP: 500,
-
-  // Cities people can pick. Replace with your launch cities.
-  // "Other" lets people type their own city.
-  CITIES: [
-    "",
-    "",
-    "",
-    "Other"
-  ]
+  // Founding spots in total (keep in sync with FOUNDING_CAP in Code.gs).
+  FOUNDING_CAP: 500
 };

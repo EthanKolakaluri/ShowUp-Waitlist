@@ -282,11 +282,11 @@
       <div class="wrap founding">
         <div class="founding__left">
           <p class="eyebrow reveal">Founding 500</p>
-          <h2 class="h2 reveal" style="--d:60ms">Founding pricing closes when your city's <span class="cap-label">500</span> spots fill</h2>
-          <p class="founding__why reveal" style="--d:120ms">Good matches need enough people nearby, so each city opens with a founding group of <span class="cap-label">500</span>. Founding pricing closes at <span class="cap-label">500</span> members or at public launch, whichever comes first.</p>
+          <h2 class="h2 reveal" style="--d:60ms">Founding pricing closes when all <span class="cap-label">500</span> spots fill</h2>
+          <p class="founding__why reveal" style="--d:120ms">ShowUp opens with a founding group of just <span class="cap-label">500</span> members. Founding pricing closes when those <span class="cap-label">500</span> spots are gone or at public launch, whichever comes first.</p>
           <div class="spots reveal" style="--d:180ms" id="spots" hidden>
-            <p class="spots__title">Founding spots left</p>
-            <div class="spots__list" id="spots-list"></div>
+            <div class="spot__row"><span class="spots__title">Founding spots left</span><span id="spots-count"></span></div>
+            <div class="bar"><div class="bar__fill"></div></div>
           </div>
         </div>
         <ul class="bonuses">
@@ -320,6 +320,7 @@
         <form class="form card reveal" id="reserve-form" style="--d:100ms" novalidate>
           <h2 class="form__title">Reserve your spot</h2>
           <p class="form__lead">Takes 3 minutes. We'll use this to match you with your crew.</p>
+          <p class="spots-note" id="spots-note" hidden></p>
 
           <div class="field-row">
             <label class="field">
@@ -334,26 +335,17 @@
             </label>
           </div>
 
-          <div class="field-row">
-            <label class="field" id="city-field">
-              <span class="field__label">City</span>
-              <select name="city" id="city-select" required></select>
-              <input name="cityText" id="city-text" placeholder="Your city" maxlength="80" autocomplete="address-level2" hidden>
-              <span class="field__error">Pick your city.</span>
-            </label>
-            <label class="field">
-              <span class="field__label">Age</span>
-              <select name="age" required>
-                <option value="" selected disabled>Choose</option>
-                <option>18–21</option>
-                <option>22–25</option>
-                <option>26–29</option>
-                <option>30+</option>
-              </select>
-              <span class="field__error">Pick your age range.</span>
-            </label>
-          </div>
-          <p class="city-spots" id="city-spots" hidden></p>
+          <label class="field">
+            <span class="field__label">Age</span>
+            <select name="age" required>
+              <option value="" selected disabled>Choose</option>
+              <option>18–21</option>
+              <option>22–25</option>
+              <option>26–29</option>
+              <option>30+</option>
+            </select>
+            <span class="field__error">Pick your age range.</span>
+          </label>
 
           <fieldset class="field">
             <legend class="field__label">What should your crew do? <span class="field__hint">Pick any</span></legend>

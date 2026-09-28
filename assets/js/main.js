@@ -114,73 +114,30 @@
     els.forEach(function (el) { io.observe(el); });
   }
 
-  /* ---------- Cities + founding spots ---------- */
+  /* ---------- Founding spots (one Founding 500 for everyone) ---------- */
   var counts = null;
 
-  function cityList() {
-    var list = Array.isArray(CFG.CITIES) ? CFG.CITIES : [];
-    return list.filter(function (c) { return isSet(c); });
-  }
-
-  function realCities() {
-    return cityList().filter(function (c) { return c.toLowerCase() !== "other"; });
-  }
-
-  function initCityField() {
-    var select = $("#city-select"), text = $("#city-text");
-    if (!select || !text) return;
-    var cities = cityList();
-    if (realCities().length === 0) {
-      // No launch cities configured yet: free-text city.
-      select.hidden = true; select.required = false; select.disabled = true;
-      text.hidden = false; text.required = true;
-      return;
-    }
-    var html = '<option value="" selected disabled>Choose your city</option>';
-    cities.forEach(function (c) {
-      var safe = c.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-      html += '<option value="' + safe + '">' + safe + "</option>";
-    });
-    select.innerHTML = html;
-    select.addEventListener("change", function () {
-      var other = select.value.toLowerCase() === "other";
-      text.hidden = !other; text.required = other;
-      if (other) text.focus();
-      showCitySpots(select.value);
-    });
-  }
-
-  function spotsLeft(city) {
-    var cap = Number(CFG.FOUNDING_CAP) || 500;
-    var taken = counts && counts.cities && counts.cities[city] ? Number(counts.cities[city]) : 0;
+  function spotsLeft() {
+    var cap = Number((counts && counts.cap) || CFG.FOUNDING_CAP) || 500;
+    var taken = counts ? Number(counts.total) || 0 : 0;
     return { cap: cap, taken: taken, left: Math.max(0, cap - taken) };
   }
 
-  function showCitySpots(city) {
-    var el = $("#city-spots");
-    if (!el) return;
-    if (!counts || !isSet(city) || city.toLowerCase() === "other") { el.hidden = true; return; }
-    var s = spotsLeft(city);
-    el.textContent = s.left + " of " + s.cap + " founding spots left in " + city;
-    el.hidden = false;
-  }
-
   function renderSpots() {
-    var box = $("#spots"), list = $("#spots-list");
-    var cities = realCities();
-    if (!box || !list || !counts || cities.length === 0) return;
-    list.innerHTML = "";
-    cities.forEach(function (city) {
-      var s = spotsLeft(city);
-      var row = document.createElement("div");
-      row.innerHTML = '<div class="spot__row"><span></span><span></span></div><div class="bar"><div class="bar__fill"></div></div>';
-      row.querySelector(".spot__row span").textContent = city;
-      row.querySelector(".spot__row span:last-child").textContent = s.left + " of " + s.cap + " left";
-      list.appendChild(row);
-      var fill = row.querySelector(".bar__fill");
+    if (!counts) return;
+    var s = spotsLeft();
+    var box = $("#spots");
+    if (box) {
+      $("#spots-count").textContent = s.left + " of " + s.cap + " left";
+      box.hidden = false;
+      var fill = box.querySelector(".bar__fill");
       requestAnimationFrame(function () { fill.style.width = Math.min(100, (s.taken / s.cap) * 100) + "%"; });
-    });
-    box.hidden = false;
+    }
+    var note = $("#spots-note");
+    if (note) {
+      note.textContent = s.left > 0 ? s.left + " of " + s.cap + " founding spots left" : "All " + s.cap + " founding spots are taken.";
+      note.hidden = false;
+    }
   }
 
   function loadCounts() {
@@ -190,8 +147,6 @@
       if (!data || !data.ok) return;
       counts = data;
       renderSpots();
-      var select = $("#city-select");
-      if (select && !select.hidden) showCitySpots(select.value);
     });
   }
 
@@ -229,14 +184,9 @@
 
   function collect(form) {
     var fd = new FormData(form);
-    var citySelect = $("#city-select");
-    var city = "";
-    if (citySelect && !citySelect.hidden && citySelect.value.toLowerCase() !== "other") city = citySelect.value;
-    else city = (fd.get("cityText") || "").toString().trim();
     return {
       firstName: (fd.get("firstName") || "").toString().trim(),
       email: (fd.get("email") || "").toString().trim(),
-      city: city,
       age: (fd.get("age") || "").toString(),
       interests: fd.getAll("interests").join(", ")
     };
@@ -253,6 +203,7 @@
       return "Checkout isn't set up yet. Finish the steps in STRIPE_INTEGRATION_TODO.md.";
     }
     if (res && res.error === "bad_email") return "That email doesn't look right. Please check it and try again.";
+    if (res && res.error === "sold_out") return "All " + (Number(CFG.FOUNDING_CAP) || 500) + " founding spots are taken. Thanks for wanting in!";
     return "We couldn't open checkout just now. Please try again in a moment." + contact;
   }
 
@@ -281,7 +232,7 @@
       data.ref = makeRef();
       data.startedAt = new Date().toISOString();
       // Only what the success page needs to greet them (see privacy.html).
-      saveLocal({ firstName: data.firstName, city: data.city, ref: data.ref });
+      saveLocal({ firstName: data.firstName, ref: data.ref });
 
       btn.classList.add("is-loading");
       btn.setAttribute("aria-busy", "true");
@@ -293,7 +244,6 @@
         ref: data.ref,
         firstName: data.firstName,
         email: data.email,
-        city: data.city,
         age: data.age,
         interests: data.interests,
         page: window.location.href.split("#")[0]
@@ -317,7 +267,6 @@
   applyLabels();
   initNav();
   initReveal();
-  initCityField();
   initForm();
   loadCounts();
 })();

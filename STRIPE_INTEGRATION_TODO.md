@@ -31,7 +31,6 @@ These aren't Stripe Checkout parameters, but the site needs them to work.
 | Apps Script → Project Settings → Script properties | `STRIPE_API_KEY` | Your Stripe secret key or restricted key (see Setup, step 1). A GitHub secret can't be used for this (see step 1). |
 | [assets/js/config.js](assets/js/config.js) | `SHEETS_WEB_APP_URL` | Your Apps Script web app URL (see Setup, step 4). |
 | [assets/js/config.js](assets/js/config.js) | `CONTACT_EMAIL` | Your support email. |
-| [assets/js/config.js](assets/js/config.js) | `CITIES` | Your launch cities, with `"Other"` last. |
 | [apps-script/Code.gs](apps-script/Code.gs) | `EXPECTED_AMOUNT_CENTS` | `999` for $9.99. Change it only if your Price amount changes (`1000` for $10.00). |
 | [assets/js/config.js](assets/js/config.js) | `LEGAL_NAME` | Your business's legal name (or your full name if you haven't formed a company). Shown in the Terms, Privacy and Refund policy pages. |
 | [assets/js/config.js](assets/js/config.js) | `GOVERNING_STATE` | The US state whose laws apply to the Terms, e.g. `California`. |
@@ -152,7 +151,7 @@ Use any future expiry date, any 3-digit CVC and any ZIP. After a successful paym
 - **Receipts:** the script sends the "You're in" email. For Stripe's own payment receipt as well, turn on **Settings → Customer emails → Successful payments** (Stripe only sends these in live mode).
 - **Confirmation emails:** they come from the Gmail account that owns the script, named "ShowUp". Free Gmail accounts can email 100 people a day; anyone past that shows **Waiting (daily email limit)** in the Sheet and is emailed automatically once the limit resets. To resend one, clear its **Confirmation email** cell and run `sendMissingConfirmationEmails`. Settings are in `CONFIRMATION_EMAIL` in `Code.gs`.
 - **Show-Up Guarantee refunds:** use **ShowUp → Refund selected reservation** in the Sheet (see Refunds above).
-- **Order tracking:** the **Reservations** tab is your list of paying founding members, with city spot numbers for the Founding 500 cap.
+- **Order tracking:** the **Reservations** tab is your list of paying founding members, numbered #1–500. Once 500 spots are held (refunds free a spot), checkout closes and the form says so. The Sheet reads and writes columns by their header names, so you can reorder or delete columns you don't need (like an old **City** column) without breaking anything.
 - **Before taking real money:** fill in `LEGAL_NAME`, `GOVERNING_STATE` and `CONTACT_EMAIL` in `config.js` (the policy pages highlight them until you do), and have someone qualified review the Terms, Privacy Policy and Refund Policy.
 
 ### Resources

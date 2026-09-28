@@ -53,10 +53,10 @@
     if (info && info.refunded) { fail("refunded"); return; }
     var local = readLocal() || {};
     var name = (info && info.firstName) || local.firstName;
-    var city = (info && info.city) || local.city;
+    var cap = (info && info.cap) || CFG.FOUNDING_CAP || 500;
     if (isSet(name)) $("#done-title").textContent = "You're in, " + name + ".";
-    if (info && info.spot && isSet(city)) addChip("Founding spot #" + info.spot + " in " + city);
-    else if (isSet(city)) addChip("Founding member · " + city);
+    if (info && info.spot) addChip("Founding spot #" + info.spot + " of " + cap);
+    else addChip("Founding member");
     if (info && info.ref) addChip("Ref " + info.ref);
     else if (isSet(local.ref)) addChip("Ref " + local.ref);
     // Private refund link (only while self-serve refunds are open).

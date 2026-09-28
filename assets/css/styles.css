@@ -361,9 +361,8 @@ button, input, select { font: inherit; color: inherit; }
   flex: none; width: 26px; height: 26px; border-radius: 50%; margin-top: 1px; background: var(--coral-deep)
   url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.3 8.4l2.3 2.3 5-5.3' fill='none' stroke='%23FFFDF9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 16px no-repeat;
 }
-.spots { margin-top: 30px; }
-.spots__title { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--quiet); margin-bottom: 12px; }
-.spots__list { display: grid; gap: 12px; max-width: 460px; }
+.spots { margin-top: 30px; max-width: 460px; }
+.spots__title { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--quiet); }
 .spot__row { display: flex; justify-content: space-between; font-weight: 600; font-size: 15px; margin-bottom: 6px; }
 .spot__row span:last-child { color: var(--coral-ink); font-variant-numeric: tabular-nums; }
 .bar { height: 10px; border-radius: 999px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-peach); overflow: hidden; }
@@ -410,11 +409,10 @@ button, input, select { font: inherit; color: inherit; }
 }
 .field input:hover, .field select:hover { box-shadow: inset 0 0 0 1.5px #D8CCB9; }
 .field input:focus, .field select:focus { outline: none; background: var(--paper); box-shadow: inset 0 0 0 2px var(--coral); }
-.field #city-text { margin-top: 8px; }
 .field__error { display: none; font-size: 13px; color: var(--coral-ink); font-weight: 600; }
 .field.is-invalid .field__error { display: block; }
 .field.is-invalid input, .field.is-invalid select { box-shadow: inset 0 0 0 2px var(--coral-ink); }
-.city-spots { margin-top: -6px; font-size: 14px; font-weight: 600; color: var(--coral-ink); }
+.spots-note { margin-top: -6px; font-size: 14px; font-weight: 600; color: var(--coral-ink); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { position: relative; cursor: pointer; }
