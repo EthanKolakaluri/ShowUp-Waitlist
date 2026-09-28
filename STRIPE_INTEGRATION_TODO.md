@@ -28,7 +28,7 @@ These aren't Stripe Checkout parameters, but the site needs them to work.
 
 | Where | Field | What to Set |
 |-------|-------|-------------|
-| Apps Script → Project Settings → Script properties | `STRIPE_SECRET_KEY` | Your Stripe secret key or restricted key (see Setup, step 1). Never put it in the repo. |
+| Apps Script → Project Settings → Script properties | `STRIPE_API_KEY` | Your Stripe secret key or restricted key (see Setup, step 1). A GitHub secret can't be used for this (see step 1). |
 | [assets/js/config.js](assets/js/config.js) | `SHEETS_WEB_APP_URL` | Your Apps Script web app URL (see Setup, step 4). |
 | [assets/js/config.js](assets/js/config.js) | `CONTACT_EMAIL` | Your support email. |
 | [assets/js/config.js](assets/js/config.js) | `CITIES` | Your launch cities, with `"Other"` last. |
@@ -42,16 +42,15 @@ These aren't Stripe Checkout parameters, but the site needs them to work.
 These parameters were configured in Checkout Studio and are already set correctly.
 
 **Files containing these parameters:**
-- [apps-script/Code.gs](apps-script/Code.gs) (`CHECKOUT_STUDIO_PARAMS` and `CHECKOUT_STUDIO_SUBSCRIPTION_PARAMS`)
+- [apps-script/Code.gs](apps-script/Code.gs) (`CHECKOUT_STUDIO_PARAMS`, plus `mode`, `success_url`, `cancel_url` and `line_items` in `createCheckout_`)
 
 | Parameter | Value |
 |-----------|-------|
+| mode | `payment` |
 | ui_mode | `hosted_page` |
+| line_items[].quantity | `1` |
 | billing_address_collection | `auto` |
-| phone_number_collection | `{ enabled: false }` |
-| automatic_tax | `{ enabled: false }` |
 | allow_promotion_codes | `false` |
-| payment_method_collection | `always` (sent only when `mode` is `subscription`, so it is not sent for the one-time reservation) |
 | submit_type | `auto` |
 | integration_identifier | `hosted_mobile_app_0002` |
 | origin_context | `mobile_app` |
@@ -72,7 +71,8 @@ These parameters were configured in Checkout Studio and are already set correctl
 - Get your keys at https://dashboard.stripe.com/test/apikeys (test mode first).
 - You only need the **secret key**. Hosted Checkout doesn't use a publishable key on the page.
 - Safest option: create a **restricted key** with **Checkout Sessions: Write** permission (write includes read). It can create and look up checkout sessions and nothing else.
-- Put it in Google Apps Script, not in a file: **Project Settings → Script properties → Add script property**, name `STRIPE_SECRET_KEY`. Script properties are the Apps Script equivalent of environment variables.
+- Put it in Google Apps Script, not in a file: **Project Settings → Script properties → Add script property**, name `STRIPE_API_KEY`. Script properties are the Apps Script equivalent of environment variables.
+- **Why not a GitHub secret?** GitHub Pages only serves static files, and only GitHub Actions workflows can read repository secrets. Neither the website nor the Apps Script can read them, and the Stripe call runs in the Apps Script. Never inject the key into the site's files, because everything on Pages is public. You can keep or delete the `STRIPE_API_KEY` GitHub secret; nothing uses it.
 - There's no `.env` file and nothing to install: the site is static and the backend is Apps Script.
 
 ### 2. Create the product
@@ -89,7 +89,7 @@ Set `CONFIG.SUCCESS_URL` and `CONFIG.CANCEL_URL` in `apps-script/Code.gs` using 
 
 1. Create a Google Sheet, then **Extensions → Apps Script**.
 2. Paste all of `apps-script/Code.gs` (with your values filled in) and save.
-3. Add the `STRIPE_SECRET_KEY` script property (step 1).
+3. Add the `STRIPE_API_KEY` script property (step 1).
 4. Select `setup` in the toolbar and click **Run**, then approve permissions. This creates the **Checkout started** and **Reservations** tabs and a 15-minute payment sync.
 5. **Deploy → New deployment → Web app**, Execute as **Me**, Who has access **Anyone**. Copy the URL into `SHEETS_WEB_APP_URL` in `assets/js/config.js` and commit it to the repo.
 6. After any later change to `Code.gs`: **Deploy → Manage deployments → Edit → Version: New version**. The URL stays the same.

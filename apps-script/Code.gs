@@ -14,7 +14,8 @@
  *
  * Setup: see STRIPE_INTEGRATION_TODO.md and README.md. In short:
  *   - Paste this file into Extensions → Apps Script in your Google Sheet.
- *   - Project Settings → Script properties → add STRIPE_SECRET_KEY.
+ *   - Project Settings → Script properties → add STRIPE_API_KEY (your Stripe
+ *     secret key). GitHub secrets can't reach this script, so it goes here.
  *   - Replace the placeholders in the CONFIG block below, run setup() once,
  *     then deploy as a Web app (Execute as: Me, Who has access: Anyone).
  */
@@ -45,21 +46,17 @@ const CONFIG = {
   RESERVATIONS_SHEET: 'Reservations'
 };
 
-// Configured in Stripe Checkout Studio — use exactly as set there.
+// Checkout Session settings — exactly as configured in Stripe Checkout Studio.
 // ui_mode: 'hosted_page' is the name in newer Stripe API versions; accounts on an
 // older default API version use 'hosted' (see STRIPE_INTEGRATION_TODO.md).
 const CHECKOUT_STUDIO_PARAMS = {
   ui_mode: 'hosted_page',
   billing_address_collection: 'auto',
-  'phone_number_collection[enabled]': 'false',
-  'automatic_tax[enabled]': 'false',
   allow_promotion_codes: 'false',
   submit_type: 'auto',
   integration_identifier: 'hosted_mobile_app_0002',
   origin_context: 'mobile_app'
 };
-// payment_method_collection ('always') is set only when MODE is 'subscription'.
-const CHECKOUT_STUDIO_SUBSCRIPTION_PARAMS = { payment_method_collection: 'always' };
 
 // Tag on every session this site creates, so the Sheet only counts ShowUp reservations.
 const APP_TAG = 'showup-waitlist';
@@ -77,8 +74,7 @@ function setup() {
   const exists = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'syncPaidCheckouts'; });
   if (!exists) ScriptApp.newTrigger('syncPaidCheckouts').timeBased().everyMinutes(15).create();
 
-  const key = PropertiesService.getScriptProperties().getProperty('STRIPE_SECRET_KEY');
-  Logger.log(key ? 'Setup done. Stripe key found.' : 'Setup done. Add STRIPE_SECRET_KEY in Project Settings → Script properties.');
+  Logger.log(getStripeKey_() ? 'Setup done. Stripe key found.' : 'Setup done. Add STRIPE_API_KEY in Project Settings → Script properties.');
 }
 
 /* =============================================================
@@ -161,9 +157,6 @@ function createCheckout_(b) {
     'metadata[ref]': started.ref
   };
   Object.keys(CHECKOUT_STUDIO_PARAMS).forEach(function (k) { params[k] = CHECKOUT_STUDIO_PARAMS[k]; });
-  if (CONFIG.MODE === 'subscription') {
-    Object.keys(CHECKOUT_STUDIO_SUBSCRIPTION_PARAMS).forEach(function (k) { params[k] = CHECKOUT_STUDIO_SUBSCRIPTION_PARAMS[k]; });
-  }
 
   const session = stripePost_('/v1/checkout/sessions', params);
   if (!session || session.error || !session.url) {
@@ -326,7 +319,8 @@ function syncPaidCheckouts() {
    Helpers
    ============================================================= */
 function getStripeKey_() {
-  return PropertiesService.getScriptProperties().getProperty('STRIPE_SECRET_KEY') || '';
+  const props = PropertiesService.getScriptProperties();
+  return props.getProperty('STRIPE_API_KEY') || props.getProperty('STRIPE_SECRET_KEY') || '';
 }
 
 function stripeGet_(path) {
