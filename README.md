@@ -9,9 +9,13 @@ It's a plain static site on **GitHub Pages**. The only backend is a Google Apps 
 ```
 index.html                  Landing page + reservation form
 success.html                Where Stripe sends people after paying; confirms the spot
+refund.html                 Self-serve refund page (private link from the email)
+terms.html, privacy.html, refunds.html   Policy pages
 assets/js/config.js         ← your settings (Apps Script URL, contact email, cities…)
 assets/js/main.js           Animations, form, founding-spot counter, redirect to Stripe
 assets/js/success.js        Payment confirmation + confetti
+assets/js/refund.js         Refund page
+assets/js/pages.js          Footer + policy-page fill-ins on the secondary pages
 assets/css/styles.css       All styling
 assets/img/                 Logo, favicon, social preview image
 apps-script/Code.gs         ← paste into your Google Sheet (Extensions → Apps Script)
@@ -38,9 +42,11 @@ Your Stripe secret key lives only inside Google Apps Script. It is never in this
 
 **Checkout started:** Started at, Reference, First name, Email, City, Age range, Interests, Status, Page
 
-**Reservations:** Paid at, Reference, First name, Email, City, Age range, Interests, City spot #, Amount, Currency, Stripe session ID, Stripe payment intent, Confirmed by, Confirmation email
+**Reservations:** Paid at, Reference, First name, Email, City, Age range, Interests, City spot #, Amount, Currency, Stripe session ID, Stripe payment intent, Confirmed by, Confirmation email, Refunded at, Refunded by
+
+**Refunds:** Refunded at, Reference, First name, Email, City, City spot #, Amount, Currency, Stripe refund ID, Stripe payment intent, Refunded by, Refund email
 
 ## Before you take real payments
 
-- **Terms, privacy and refunds.** Stripe generally expects your site to show terms, a privacy policy and a refund policy. Add pages for these and link them in the footer, and write the Show-Up Guarantee into those terms.
+- **Terms, privacy and refunds.** Drafts are in `terms.html`, `privacy.html` and `refunds.html`, linked from the footer and the checkout checkbox. Fill in `LEGAL_NAME`, `GOVERNING_STATE` and `CONTACT_EMAIL` in `assets/js/config.js`, and have them reviewed before you rely on them.
 - **Contact email and launch cities.** Fill in `CONTACT_EMAIL` and `CITIES` in `assets/js/config.js`.

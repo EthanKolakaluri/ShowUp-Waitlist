@@ -33,6 +33,8 @@ These aren't Stripe Checkout parameters, but the site needs them to work.
 | [assets/js/config.js](assets/js/config.js) | `CONTACT_EMAIL` | Your support email. |
 | [assets/js/config.js](assets/js/config.js) | `CITIES` | Your launch cities, with `"Other"` last. |
 | [apps-script/Code.gs](apps-script/Code.gs) | `EXPECTED_AMOUNT_CENTS` | `999` for $9.99. Change it only if your Price amount changes (`1000` for $10.00). |
+| [assets/js/config.js](assets/js/config.js) | `LEGAL_NAME` | Your business's legal name (or your full name if you haven't formed a company). Shown in the Terms, Privacy and Refund policy pages. |
+| [assets/js/config.js](assets/js/config.js) | `GOVERNING_STATE` | The US state whose laws apply to the Terms, e.g. `California`. |
 | [index.html](index.html) (line 12) | `og:image` | `https://ethankolakaluri.github.io/ShowUp-Waitlist/assets/img/og.png`, so shared links show the preview image. |
 
 ---
@@ -70,7 +72,7 @@ These parameters were configured in Checkout Studio and are already set correctl
 
 - Get your keys at https://dashboard.stripe.com/test/apikeys (test mode first).
 - You only need the **secret key**. Hosted Checkout doesn't use a publishable key on the page.
-- Safest option: create a **restricted key** with **Checkout Sessions: Write** permission (write includes read). It can create and look up checkout sessions and nothing else.
+- Safest option: create a **restricted key** with **Checkout Sessions: Write** and **Refunds: Write** (write includes read). It can create and look up checkout sessions and refunds, and nothing else.
 - Put it in Google Apps Script, not in a file: **Project Settings → Script properties → Add script property**, name `STRIPE_API_KEY`. Script properties are the Apps Script equivalent of environment variables.
 - **Why not a GitHub secret?** GitHub Pages only serves static files, and only GitHub Actions workflows can read repository secrets. Neither the website nor the Apps Script can read them, and the Stripe call runs in the Apps Script. Never inject the key into the site's files, because everything on Pages is public. You can keep or delete the `STRIPE_API_KEY` GitHub secret; nothing uses it.
 - There's no `.env` file and nothing to install: the site is static and the backend is Apps Script.
@@ -90,7 +92,7 @@ Set `CONFIG.SUCCESS_URL` and `CONFIG.CANCEL_URL` in `apps-script/Code.gs` using 
 1. Create a Google Sheet, then **Extensions → Apps Script**.
 2. Paste all of `apps-script/Code.gs` (with your values filled in) and save.
 3. Add the `STRIPE_API_KEY` script property (step 1).
-4. Select `setup` in the toolbar and click **Run**, then approve permissions. Tick **Select all**: spreadsheets, external service, run when you're not present, send email as you, and see your email address (only used by `sendTestEmail`). This creates the **Checkout started** and **Reservations** tabs and a 15-minute payment sync.
+4. Select `setup` in the toolbar and click **Run**, then approve permissions. Tick **Select all**: spreadsheets, external service, run when you're not present, send email as you, see your email address (only used by `sendTestEmail`), and display prompts inside Google apps (the ShowUp menu's confirm boxes). This creates the **Checkout started**, **Reservations** and **Refunds** tabs, a secret for refund links (`REFUND_SECRET` in Script properties; don't share or change it, or existing refund links stop working) and a 15-minute sync.
    - Optional: select `sendTestEmail` and click **Run** to get the confirmation email in your own inbox.
 5. **Deploy → New deployment → Web app**, Execute as **Me**, Who has access **Anyone**. Copy the URL into `SHEETS_WEB_APP_URL` in `assets/js/config.js` and commit it to the repo.
 6. After any later change to `Code.gs`: run `setup` once (so Google can ask for any new permission), then **Deploy → Manage deployments → Edit → Version: New version**. The URL stays the same. If you skip the permission step after a change that needs a new one, the web app stops working until you approve it.
@@ -103,12 +105,15 @@ Repo **Settings → Pages → Deploy from a branch → `main` / `(root)`**. The 
 
 ```
 apps-script/Code.gs      Creates Checkout Sessions (action "checkout"), confirms payments,
-                         writes the Sheet, sends the confirmation email, 15-minute sync.
-                         All Stripe calls live here.
+                         writes the Sheet, sends the emails, makes refunds (actions
+                         "refund_status" and "refund", plus the ShowUp menu in the Sheet),
+                         15-minute sync. All Stripe calls live here.
 assets/js/config.js      SHEETS_WEB_APP_URL and site settings (no secrets)
 assets/js/main.js        Form → calls the Apps Script → redirects to Stripe Checkout
 assets/js/success.js     Confirms the payment on return and shows "You're in"
-success.html             The page Stripe redirects to after payment
+success.html             The page Stripe redirects to after payment (with the refund link)
+refund.html + assets/js/refund.js   Self-serve refund page (link from the email / success page)
+terms.html, privacy.html, refunds.html   Policy pages (fill-ins come from config.js)
 STRIPE_INTEGRATION_TODO.md  This file
 ```
 
@@ -120,6 +125,14 @@ STRIPE_INTEGRATION_TODO.md  This file
 4. The browser is sent to the session's Stripe-hosted `url`, and the visitor pays.
 5. Stripe redirects to `success.html?session_id=cs_…`. The page asks the script to confirm. The script fetches the session from Stripe, checks it's paid, tagged `showup-waitlist`, $9.99 USD, then adds a **Reservations** row, marks the **Checkout started** row **Paid**, and emails them a "You're in" confirmation.
 6. If someone closes the tab before step 5, the 15-minute sync finds their paid session on Stripe, adds them and emails them anyway.
+
+### Refunds
+
+- **Self-serve, before launch.** The confirmation email and the success page carry a private link to `refund.html?ref=…&t=…`. The `t` part is a signature made with `REFUND_SECRET`, so a link only works for its own reservation. The page shows what they'll give up, then one click calls `POST /v1/refunds` for the payment (with an idempotency key, so it can't refund twice).
+- **What a refund does:** marks the **Reservations** row (**Refunded at**, **Refunded by**), adds a row to the **Refunds** tab, marks **Checkout started** as **Refunded**, frees the founding spot in the counter (spot numbers are never reused), and emails them a refund confirmation.
+- **You refunding someone** (for example a Show-Up Guarantee claim): open the Sheet, go to **Reservations**, click any cell in their row, then **ShowUp → Refund selected reservation**. The ShowUp menu appears a few seconds after the Sheet opens.
+- **Refunds made in the Stripe Dashboard** are picked up by the 15-minute sync. A full refund frees the spot; a partial one is logged in **Refunds** and they keep their spot.
+- **At launch:** set `SELF_SERVE_REFUNDS: false` in `Code.gs` and deploy a new version. Refund links then say refunds by link have closed; the Sheet menu still works.
 
 ### Testing (test mode)
 
@@ -138,9 +151,9 @@ Use any future expiry date, any 3-digit CVC and any ZIP. After a successful paym
 - **Go live:** create the product and Price in live mode, then swap in the live Price ID and live secret key. Redeploy the Apps Script as a new version.
 - **Receipts:** the script sends the "You're in" email. For Stripe's own payment receipt as well, turn on **Settings → Customer emails → Successful payments** (Stripe only sends these in live mode).
 - **Confirmation emails:** they come from the Gmail account that owns the script, named "ShowUp". Free Gmail accounts can email 100 people a day; anyone past that shows **Waiting (daily email limit)** in the Sheet and is emailed automatically once the limit resets. To resend one, clear its **Confirmation email** cell and run `sendMissingConfirmationEmails`. Settings are in `CONFIRMATION_EMAIL` in `Code.gs`.
-- **Show-Up Guarantee refunds:** refund the $9.99 from the payment in the Stripe Dashboard. You can find it via the Stripe session ID in the Sheet.
+- **Show-Up Guarantee refunds:** use **ShowUp → Refund selected reservation** in the Sheet (see Refunds above).
 - **Order tracking:** the **Reservations** tab is your list of paying founding members, with city spot numbers for the Founding 500 cap.
-- **Before taking real money:** add terms, privacy and refund policy pages and link them in the site footer.
+- **Before taking real money:** fill in `LEGAL_NAME`, `GOVERNING_STATE` and `CONTACT_EMAIL` in `config.js` (the policy pages highlight them until you do), and have someone qualified review the Terms, Privacy Policy and Refund Policy.
 
 ### Resources
 

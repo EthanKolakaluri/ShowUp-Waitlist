@@ -16,9 +16,13 @@
  *   3. Emails each person a "You're in" confirmation once their payment is
  *      confirmed (sent from your Gmail; see CONFIRMATION_EMAIL below).
  *   4. Returns founding-spot counts per city for the website's counter.
- *   5. A 15-minute sync catches anyone who paid but closed the tab before
- *      the success page loaded, and sends emails held back by Gmail's
- *      daily limit.
+ *   5. Refunds: people can refund themselves before launch from a private
+ *      link in their email or on the success page, and you can refund anyone
+ *      from the ShowUp menu in the Sheet. Each refund is made in Stripe,
+ *      logged in the "Refunds" tab, frees the founding spot and emails them.
+ *   6. A 15-minute sync catches anyone who paid but closed the tab before
+ *      the success page loaded, records refunds made in the Stripe Dashboard,
+ *      and sends emails held back by Gmail's daily limit.
  *
  * Setup: see STRIPE_INTEGRATION_TODO.md and README.md. In short:
  *   - Paste this file into Extensions → Apps Script in your Google Sheet.
@@ -36,6 +40,10 @@
  *   - Reservations are only written after Stripe confirms the payment.
  *   - Emails only go to people Stripe says have paid, so the form can't be
  *     used to send mail to strangers. Names and cities are escaped.
+ *   - Refund links are signed with a secret kept in Script properties
+ *     (REFUND_SECRET, created by setup()), so nobody can refund someone else
+ *     by guessing a reference. Stripe is sent an idempotency key, so a
+ *     payment can never be refunded twice.
  *   - Rate limits (RATE_LIMITS below) stop spam from filling the Sheet or
  *     using up Google's daily quota for outside requests.
  *   - Stripe error details are logged here, never shown to visitors.
@@ -65,8 +73,14 @@ const CONFIG = {
   // How far back the sync looks for paid checkouts, in days.
   SYNC_LOOKBACK_DAYS: 3,
 
+  // Let people refund themselves from the link in their email and on the
+  // success page. Set to false at launch: after that, refunds go through the
+  // Show-Up Guarantee and you issue them from the ShowUp menu in the Sheet.
+  SELF_SERVE_REFUNDS: true,
+
   STARTED_SHEET: 'Checkout started',
-  RESERVATIONS_SHEET: 'Reservations'
+  RESERVATIONS_SHEET: 'Reservations',
+  REFUNDS_SHEET: 'Refunds'
 };
 
 // Anti-spam limits. Generous for real visitors, tight enough to stop a script
@@ -74,7 +88,8 @@ const CONFIG = {
 const RATE_LIMITS = {
   CHECKOUTS_PER_EMAIL_PER_HOUR: 5,     // one person retrying checkout
   CHECKOUTS_PER_10_MIN: 120,           // everyone combined
-  CONFIRMS_PER_10_MIN: 300             // success-page checks, everyone combined
+  CONFIRMS_PER_10_MIN: 300,            // success-page checks, everyone combined
+  REFUND_REQUESTS_PER_10_MIN: 60       // refund page loads + refunds, everyone combined
 };
 
 // Checkout Session settings — exactly as configured in Stripe Checkout Studio.
@@ -105,7 +120,8 @@ const CONFIRMATION_EMAIL = {
 const APP_TAG = 'showup-waitlist';
 
 const STARTED_HEADERS = ['Started at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'Status', 'Page'];
-const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'City spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by', 'Confirmation email'];
+const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'City', 'Age range', 'Interests', 'City spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by', 'Confirmation email', 'Refunded at', 'Refunded by'];
+const REFUND_HEADERS = ['Refunded at', 'Reference', 'First name', 'Email', 'City', 'City spot #', 'Amount', 'Currency', 'Stripe refund ID', 'Stripe payment intent', 'Refunded by', 'Refund email'];
 const EMAIL_WAITING = 'Waiting (daily email limit)';
 
 /* =============================================================
@@ -114,6 +130,8 @@ const EMAIL_WAITING = 'Waiting (daily email limit)';
 function setup() {
   getSheet_(CONFIG.STARTED_SHEET, STARTED_HEADERS);
   getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
+  getSheet_(CONFIG.REFUNDS_SHEET, REFUND_HEADERS);
+  getRefundSecret_();
 
   const exists = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'syncPaidCheckouts'; });
   if (!exists) ScriptApp.newTrigger('syncPaidCheckouts').timeBased().everyMinutes(15).create();
@@ -143,6 +161,12 @@ function doPost(e) {
     if (body.action === 'confirm') {
       if (rateLimited_('confirm', RATE_LIMITS.CONFIRMS_PER_10_MIN, 600)) return json_({ ok: false, error: 'rate_limited' });
       return json_(confirmSession_(String(body.session_id || ''), 'Success page'));
+    }
+    if (body.action === 'refund_status' || body.action === 'refund') {
+      if (rateLimited_('refund', RATE_LIMITS.REFUND_REQUESTS_PER_10_MIN, 600)) return json_({ ok: false, error: 'rate_limited' });
+      return json_(body.action === 'refund'
+        ? selfServeRefund_(String(body.ref || ''), String(body.t || ''))
+        : refundStatus_(String(body.ref || ''), String(body.t || '')));
     }
     return json_({ ok: false, error: 'unknown_action' });
   } catch (err) {
@@ -288,7 +312,9 @@ function addReservation_(s, source) {
     s.id,
     typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent && s.payment_intent.id) || '',
     source,
-    CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : ''
+    CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : '',
+    '',
+    ''
   ];
   reservations.appendRow(row);
 
@@ -306,15 +332,23 @@ function addReservation_(s, source) {
 
 function reservationResult_(values, already) {
   const i = function (h) { return RESERVATION_HEADERS.indexOf(h); };
-  return {
+  const ref = values[i('Reference')] || '';
+  const refunded = !!values[i('Refunded at')];
+  const result = {
     ok: true,
     already: already,
-    ref: values[i('Reference')] || '',
+    ref: ref,
     firstName: values[i('First name')] || '',
     city: values[i('City')] || '',
     spot: values[i('City spot #')] || '',
-    cap: CONFIG.FOUNDING_CAP
+    cap: CONFIG.FOUNDING_CAP,
+    refunded: refunded
   };
+  // The private refund link for this person, shown on the success page.
+  if (CONFIG.SELF_SERVE_REFUNDS && ref && !refunded) {
+    result.refundToken = refundToken_(ref, values[i('Stripe session ID')]);
+  }
+  return result;
 }
 
 /* =============================================================
@@ -323,7 +357,9 @@ function reservationResult_(values, already) {
 function getCounts_() {
   const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
   const cityCol = headerIndex_(sheet, 'City');
-  const values = sheet.getDataRange().getValues().slice(1);
+  const refundedCol = headerIndex_(sheet, 'Refunded at');
+  // Refunded reservations don't hold a spot.
+  const values = sheet.getDataRange().getValues().slice(1).filter(function (r) { return !r[refundedCol]; });
   const cities = {};
   values.forEach(function (r) {
     const c = String(r[cityCol] || '').trim();
@@ -332,6 +368,8 @@ function getCounts_() {
   return { ok: true, cap: CONFIG.FOUNDING_CAP, cities: cities, total: values.length };
 }
 
+// Spot numbers count every reservation in the city, refunded ones too, so
+// no two people are ever given the same number.
 function countCity_(sheet, city) {
   const cityCol = headerIndex_(sheet, 'City');
   const target = String(city).trim().toLowerCase();
@@ -344,8 +382,12 @@ function countCity_(sheet, city) {
    4. Every-15-minutes sync (set up by setup())
    ============================================================= */
 function syncPaidCheckouts() {
-  if (CONFIRMATION_EMAIL.ENABLED) sendConfirmationEmails_(function (status) { return status === EMAIL_WAITING; });
+  if (CONFIRMATION_EMAIL.ENABLED) {
+    sendConfirmationEmails_(function (status) { return status === EMAIL_WAITING; });
+    retryRefundEmails_();
+  }
   if (!getStripeKey_()) return;
+  syncRefunds_();
   const since = Math.floor(Date.now() / 1000) - CONFIG.SYNC_LOOKBACK_DAYS * 86400;
   let startingAfter = '';
   let pages = 0;
@@ -377,23 +419,24 @@ function syncPaidCheckouts() {
 }
 
 /* =============================================================
-   5. Confirmation email
+   5. Emails
    ============================================================= */
 
-// Run from the editor to see the email yourself (it goes to your own Gmail).
+// Run from the editor (or ShowUp menu) to see the email yourself. It goes
+// to your own Gmail. Its refund link is a sample and won't work.
 function sendTestEmail() {
   const to = Session.getEffectiveUser().getEmail();
   const status = sendConfirmation_({
     'Email': to, 'First name': 'Maya', 'City': 'Los Angeles', 'City spot #': 12,
     'Amount': (CONFIG.EXPECTED_AMOUNT_CENTS || 999) / 100, 'Currency': 'USD',
-    'Reference': 'SU-TEST1234', 'Paid at': new Date()
+    'Reference': 'SU-TEST1234', 'Stripe session ID': 'cs_test_sample', 'Paid at': new Date()
   });
   Logger.log(status.indexOf('Sent') === 0 ? 'Test email sent to ' + to + '. Check your inbox (and spam).' : 'Test email not sent: ' + status);
 }
 
-// Run from the editor to email everyone in Reservations whose
-// "Confirmation email" cell is empty: people who reserved before emails were
-// turned on, or rows where you cleared the cell to send it again.
+// Run from the editor (or ShowUp menu) to email everyone in Reservations
+// whose "Confirmation email" cell is empty: people who reserved before emails
+// were turned on, or rows where you cleared the cell to send it again.
 function sendMissingConfirmationEmails() {
   const sent = sendConfirmationEmails_(function (status) { return status === '' || status === EMAIL_WAITING; });
   Logger.log('Sent ' + sent + ' confirmation email(s).');
@@ -407,10 +450,12 @@ function sendConfirmationEmails_(shouldSend) {
   try {
     const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
     const col = headerIndex_(sheet, 'Confirmation email');
+    const refundedCol = headerIndex_(sheet, 'Refunded at');
     const values = sheet.getDataRange().getValues();
     let sent = 0;
     for (let r = 1; r < values.length; r++) {
       if (!shouldSend(String(values[r][col] || ''))) continue;
+      if (refundedCol > -1 && values[r][refundedCol]) continue; // refunded: no "You're in"
       if (MailApp.getRemainingDailyQuota() < 1) break;
       const status = sendConfirmation_(rowObject_(sheet, values[r]));
       sheet.getRange(r + 1, col + 1).setValue(status);
@@ -423,20 +468,51 @@ function sendConfirmationEmails_(shouldSend) {
   }
 }
 
-// Sends the email for one reservation (an object keyed by column header) and
-// returns what to write in its "Confirmation email" cell.
+// Refund emails held back by Gmail's daily limit (Refunds tab).
+function retryRefundEmails_() {
+  const lock = LockService.getDocumentLock() || LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    const log = getSheet_(CONFIG.REFUNDS_SHEET, REFUND_HEADERS);
+    const col = headerIndex_(log, 'Refund email');
+    const values = log.getDataRange().getValues();
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][col]) !== EMAIL_WAITING) continue;
+      if (MailApp.getRemainingDailyQuota() < 1) break;
+      const r = rowObject_(log, values[i]);
+      const status = sendRefundEmail_(r, { amount: Math.round((Number(r['Amount']) || 0) * 100), currency: r['Currency'] });
+      log.getRange(i + 1, col + 1).setValue(status);
+      if (status === EMAIL_WAITING) break;
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Sends the "You're in" email for one reservation (an object keyed by column
+// header) and returns what to write in its "Confirmation email" cell.
 function sendConfirmation_(r) {
-  const to = String(r['Email'] || '').trim();
+  return sendMail_(r['Email'], function () { return confirmationMessage_(r); });
+}
+
+function sendRefundEmail_(r, refund) {
+  return sendMail_(r['Email'], function () { return refundMessage_(r, refund); });
+}
+
+// Returns a status for the Sheet: "Sent …", "Waiting (daily email limit)",
+// "Failed: …" or "Not sent: …".
+function sendMail_(address, build) {
+  const to = String(address || '').trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return 'Not sent: no valid email';
   if (MailApp.getRemainingDailyQuota() < 1) return EMAIL_WAITING;
   try {
-    const msg = confirmationMessage_(r);
+    const msg = build();
     const options = { to: to, subject: msg.subject, body: msg.text, htmlBody: msg.html, name: CONFIRMATION_EMAIL.FROM_NAME };
     if (CONFIRMATION_EMAIL.REPLY_TO) options.replyTo = CONFIRMATION_EMAIL.REPLY_TO;
     MailApp.sendEmail(options);
     return 'Sent ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
   } catch (err) {
-    console.error('Confirmation email failed', err);
+    console.error('Email failed', err);
     if (/too many times|quota|limit/i.test(String(err))) return EMAIL_WAITING;
     return 'Failed: ' + String((err && err.message) || err).slice(0, 120);
   }
@@ -450,8 +526,7 @@ function confirmationMessage_(r) {
   const ref = String(r['Reference'] || '').trim();
   const currency = String(r['Currency'] || 'USD').toUpperCase();
   const price = money_(r['Amount'], currency);
-  const paidAt = r['Paid at'] instanceof Date ? r['Paid at'] : new Date();
-  const date = Utilities.formatDate(paidAt, Session.getScriptTimeZone(), 'MMM d, yyyy');
+  const date = formatDay_(r['Paid at']);
   const cap = CONFIG.FOUNDING_CAP;
 
   const hello = name ? "You're in, " + name : "You're in";
@@ -468,6 +543,7 @@ function confirmationMessage_(r) {
   const guarantee = "Go to 3 hangouts in your first 30 days. If you haven't met at least one person you want to see again, we refund your first month in full.";
   const invite = 'mailto:?subject=' + encodeURIComponent('Come to ShowUp with me') +
     '&body=' + encodeURIComponent('I just reserved a founding spot on ShowUp. It matches you with a crew and plans the hangouts for you. Grab a spot before they\'re gone: ' + site);
+  const refundUrl = CONFIG.SELF_SERVE_REFUNDS && ref ? refundUrl_(ref, r['Stripe session ID']) : '';
 
   const text = [
     hello + '.',
@@ -487,42 +563,18 @@ function confirmationMessage_(r) {
     "Know someone who'd come along? Send them " + site,
     '',
     'Questions? Just reply to this email.',
+    refundUrl ? 'Changed your mind? You can get a full refund anytime before launch: ' + refundUrl : '',
+    '',
     'ShowUp'
   ].filter(function (line, i, all) { return line !== '' || all[i - 1] !== ''; }).join('\n');
 
-  const F_HEAD = "'Bricolage Grotesque','Helvetica Neue',Helvetica,Arial,sans-serif";
-  const F_BODY = "'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif";
-  const row = function (label, value) {
-    return '<tr><td style="padding:6px 0;font:14px/1.4 ' + F_BODY + ';color:#7A6A5F;">' + esc_(label) + '</td>' +
-      '<td align="right" style="padding:6px 0;font:600 14px/1.4 ' + F_BODY + ';color:#2B211C;">' + esc_(value) + '</td></tr>';
-  };
-
-  const html = '<!doctype html><html><head><meta charset="utf-8">' +
-    '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only">' +
-    '<title>' + esc_(subject) + '</title>' +
-    '<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">' +
-    '</head><body style="margin:0;padding:0;background:#FBF6EE;">' +
-    '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">' + esc_(spotLine ? 'Spot #' + spot + ' ' + spotLine + '. ' + lead : lead) + '</div>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBF6EE;"><tr><td align="center" style="padding:32px 16px;">' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">' +
-
-    // Logo
-    '<tr><td style="padding:0 4px 20px;"><a href="' + esc_(site) + '" style="text-decoration:none;">' +
-    '<img src="' + esc_(site + 'assets/img/email-logo.png') + '" width="132" alt="showup" style="display:block;border:0;width:132px;height:auto;font:800 28px ' + F_HEAD + ';color:#2B211C;"></a></td></tr>' +
-
-    // Card
-    '<tr><td style="background:#FFFDF9;border:1px solid #F0E4D7;border-radius:24px;padding:36px 32px;">' +
-    '<p style="margin:0 0 14px;"><span style="display:inline-block;background:#FFE4D9;color:#C8401C;border-radius:999px;padding:5px 12px;font:600 12px/1 ' + F_BODY + ';letter-spacing:.08em;text-transform:uppercase;">Founding ' + esc_(cap) + '</span></p>' +
-    '<h1 style="margin:0 0 12px;font:800 34px/1.1 ' + F_HEAD + ';color:#2B211C;letter-spacing:-.02em;">' + esc_(hello) + '.</h1>' +
-    '<p style="margin:0 0 24px;font:16px/1.6 ' + F_BODY + ';color:#5C4F46;">' + esc_(lead) + '</p>' +
-
+  const body =
     (spotLine
       ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFF0E8;border-radius:18px;margin:0 0 28px;"><tr>' +
         '<td width="1" style="padding:18px 6px 18px 22px;font:800 44px/1 ' + F_HEAD + ';color:#FF5B35;white-space:nowrap;">#' + esc_(spot) + '</td>' +
         '<td style="padding:18px 22px 18px 10px;font:600 15px/1.4 ' + F_BODY + ';color:#2B211C;">' + esc_(spotLine) + '</td>' +
         '</tr></table>'
       : '') +
-
     '<h2 style="margin:0 0 12px;font:800 18px/1.3 ' + F_HEAD + ';color:#2B211C;">What happens next</h2>' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;">' +
     steps.map(function (s, i) {
@@ -531,32 +583,127 @@ function confirmationMessage_(r) {
         '<td valign="top" style="padding:3px 0 12px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">' + esc_(s) + '</td></tr>';
     }).join('') +
     '</table>' +
-
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:4px solid #FF5B35;margin:0 0 26px;"><tr><td style="padding:2px 0 2px 16px;">' +
     '<p style="margin:0 0 4px;font:800 16px/1.3 ' + F_HEAD + ';color:#2B211C;">The Show-Up Guarantee</p>' +
     '<p style="margin:0;font:14px/1.55 ' + F_BODY + ';color:#5C4F46;">' + esc_(guarantee) + '</p>' +
     '</td></tr></table>' +
-
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #F0E4D7;border-bottom:1px solid #F0E4D7;margin:0 0 28px;">' +
-    '<tr><td colspan="2" style="height:8px;line-height:8px;font-size:0;">&nbsp;</td></tr>' +
-    row('Paid', price + ' ' + currency) + row('Date', date) + (ref ? row('Reference', ref) : '') +
-    '<tr><td colspan="2" style="height:8px;line-height:8px;font-size:0;">&nbsp;</td></tr>' +
-    '</table>' +
-
+    emailFacts_([['Paid', price + ' ' + currency], ['Date', date], ['Reference', ref]]) +
     '<p style="margin:0 0 10px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">Know someone who\'d come along?</p>' +
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#C8401C;border-radius:999px;">' +
-    '<a href="' + esc_(invite) + '" style="display:inline-block;padding:13px 24px;font:600 15px/1 ' + F_BODY + ';color:#FFFDF9;text-decoration:none;">Invite a friend</a>' +
-    '</td></tr></table>' +
-    '</td></tr>' +
+    emailButton_('Invite a friend', invite);
 
-    // Footer
-    '<tr><td style="padding:22px 4px 0;font:13px/1.6 ' + F_BODY + ';color:#7A6A5F;">' +
-    'Questions? Just reply to this email.<br>' +
-    'You\'re getting this because you reserved a founding spot at <a href="' + esc_(site) + '" style="color:#C8401C;">ShowUp</a>.' +
+  const footer = 'Questions? Just reply to this email.<br>' +
+    (refundUrl ? 'Changed your mind? You can get a full refund anytime before launch. <a href="' + esc_(refundUrl) + '" style="color:#C8401C;">Refund my reservation</a><br>' : '') +
+    'You\'re getting this because you reserved a founding spot at <a href="' + esc_(site) + '" style="color:#C8401C;">ShowUp</a>.';
+
+  return {
+    subject: subject,
+    text: text,
+    html: emailLayout_({
+      title: subject,
+      preheader: spotLine ? 'Spot #' + spot + ' ' + spotLine + '. ' + lead : lead,
+      eyebrow: 'Founding ' + cap,
+      heading: hello + '.',
+      lead: lead,
+      body: body,
+      footer: footer
+    })
+  };
+}
+
+function refundMessage_(r, refund) {
+  const site = siteUrl_();
+  const name = String(r['First name'] || '').trim();
+  const city = String(r['City'] || '').trim();
+  const spot = Number(r['City spot #']) || 0;
+  const ref = String(r['Reference'] || '').trim();
+  const currency = String((refund && refund.currency) || r['Currency'] || 'USD').toUpperCase();
+  const amount = refund && refund.amount ? refund.amount / 100 : r['Amount'];
+  const price = money_(amount, currency);
+
+  const subject = 'Your ShowUp reservation is refunded';
+  const heading = name ? 'Your refund is on its way, ' + name + '.' : 'Your refund is on its way.';
+  const lead = "We've refunded " + price + ' to the card you paid with. It usually shows up in 5–10 business days, depending on your bank.';
+  const released = spot && city ? 'Founding spot #' + spot + ' in ' + city + ' has been released.' : 'Your founding spot has been released.';
+
+  const text = [
+    heading,
+    '',
+    lead,
+    released,
+    '',
+    'Refunded: ' + price + ' ' + currency,
+    'Date: ' + formatDay_(new Date()),
+    ref ? 'Reference: ' + ref : '',
+    '',
+    'Changed your mind again? You can reserve a founding spot while they last: ' + site + '#reserve',
+    '',
+    'Questions? Just reply to this email.',
+    'ShowUp'
+  ].filter(function (line, i, all) { return line !== '' || all[i - 1] !== ''; }).join('\n');
+
+  const body =
+    '<p style="margin:0 0 24px;font:600 15px/1.5 ' + F_BODY + ';color:#2B211C;background:#FFF0E8;border-radius:14px;padding:14px 18px;">' + esc_(released) + '</p>' +
+    emailFacts_([['Refunded', price + ' ' + currency], ['Date', formatDay_(new Date())], ['Reference', ref]]) +
+    '<p style="margin:0 0 10px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">Changed your mind again? Founding spots are open while they last.</p>' +
+    emailButton_('Reserve again', site + '#reserve');
+
+  return {
+    subject: subject,
+    text: text,
+    html: emailLayout_({
+      title: subject,
+      preheader: lead,
+      eyebrow: 'Refund',
+      heading: heading,
+      lead: lead,
+      body: body,
+      footer: 'Questions? Just reply to this email.<br>You\'re getting this because you asked for a refund of your ShowUp reservation.'
+    })
+  };
+}
+
+const F_HEAD = "'Bricolage Grotesque','Helvetica Neue',Helvetica,Arial,sans-serif";
+const F_BODY = "'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif";
+
+// Shared email frame: logo, card, footer. Everything is inline-styled so it
+// looks the same in Gmail, Apple Mail and Outlook. o.body and o.footer are
+// HTML; everything else is escaped here.
+function emailLayout_(o) {
+  const site = siteUrl_();
+  return '<!doctype html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only">' +
+    '<title>' + esc_(o.title) + '</title>' +
+    '<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">' +
+    '</head><body style="margin:0;padding:0;background:#FBF6EE;">' +
+    '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">' + esc_(o.preheader) + '</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBF6EE;"><tr><td align="center" style="padding:32px 16px;">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">' +
+    '<tr><td style="padding:0 4px 20px;"><a href="' + esc_(site) + '" style="text-decoration:none;">' +
+    '<img src="' + esc_(site + 'assets/img/email-logo.png') + '" width="132" alt="showup" style="display:block;border:0;width:132px;height:auto;font:800 28px ' + F_HEAD + ';color:#2B211C;"></a></td></tr>' +
+    '<tr><td style="background:#FFFDF9;border:1px solid #F0E4D7;border-radius:24px;padding:36px 32px;">' +
+    '<p style="margin:0 0 14px;"><span style="display:inline-block;background:#FFE4D9;color:#C8401C;border-radius:999px;padding:5px 12px;font:600 12px/1 ' + F_BODY + ';letter-spacing:.08em;text-transform:uppercase;">' + esc_(o.eyebrow) + '</span></p>' +
+    '<h1 style="margin:0 0 12px;font:800 34px/1.1 ' + F_HEAD + ';color:#2B211C;letter-spacing:-.02em;">' + esc_(o.heading) + '</h1>' +
+    '<p style="margin:0 0 24px;font:16px/1.6 ' + F_BODY + ';color:#5C4F46;">' + esc_(o.lead) + '</p>' +
+    o.body +
     '</td></tr>' +
+    '<tr><td style="padding:22px 4px 0;font:13px/1.6 ' + F_BODY + ';color:#7A6A5F;">' + o.footer + '</td></tr>' +
     '</table></td></tr></table></body></html>';
+}
 
-  return { subject: subject, text: text, html: html };
+function emailFacts_(pairs) {
+  const rows = pairs.filter(function (p) { return p[1]; }).map(function (p) {
+    return '<tr><td style="padding:6px 0;font:14px/1.4 ' + F_BODY + ';color:#7A6A5F;">' + esc_(p[0]) + '</td>' +
+      '<td align="right" style="padding:6px 0;font:600 14px/1.4 ' + F_BODY + ';color:#2B211C;">' + esc_(p[1]) + '</td></tr>';
+  }).join('');
+  const gap = '<tr><td colspan="2" style="height:8px;line-height:8px;font-size:0;">&nbsp;</td></tr>';
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #F0E4D7;border-bottom:1px solid #F0E4D7;margin:0 0 28px;">' +
+    gap + rows + gap + '</table>';
+}
+
+function emailButton_(label, href) {
+  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#C8401C;border-radius:999px;">' +
+    '<a href="' + esc_(href) + '" style="display:inline-block;padding:13px 24px;font:600 15px/1 ' + F_BODY + ';color:#FFFDF9;text-decoration:none;">' + esc_(label) + '</a>' +
+    '</td></tr></table>';
 }
 
 // The site's home page, taken from CANCEL_URL (…/ShowUp-Waitlist/#reserve → …/ShowUp-Waitlist/).
@@ -570,10 +717,253 @@ function money_(amount, currency) {
   return String(currency || 'USD').toUpperCase() === 'USD' ? '$' + n : n;
 }
 
+function formatDay_(value) {
+  const d = value instanceof Date ? value : new Date();
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MMM d, yyyy');
+}
+
 function esc_(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* =============================================================
+   6. Refunds
+   ============================================================= */
+
+// Adds a "ShowUp" menu to the Sheet each time you open it.
+// To refund someone (for example a Show-Up Guarantee claim): open the
+// Reservations tab, click any cell in their row, then
+// ShowUp → Refund selected reservation.
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('ShowUp')
+    .addItem('Refund selected reservation', 'refundSelectedReservation')
+    .addSeparator()
+    .addItem('Send missing confirmation emails', 'sendMissingConfirmationEmails')
+    .addItem('Send me a test email', 'sendTestEmail')
+    .addToUi();
+}
+
+function refundSelectedReservation() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActiveSheet();
+  if (sheet.getName() !== CONFIG.RESERVATIONS_SHEET) {
+    ui.alert('Open the "' + CONFIG.RESERVATIONS_SHEET + '" tab and click any cell in the row you want to refund.');
+    return;
+  }
+  const rowNumber = sheet.getActiveRange().getRow();
+  if (rowNumber < 2) {
+    ui.alert('Click any cell in the row of the person you want to refund.');
+    return;
+  }
+  const r = rowObject_(sheet, sheet.getRange(rowNumber, 1, 1, sheet.getLastColumn()).getValues()[0]);
+  const who = (r['First name'] || 'This person') + (r['Email'] ? ' (' + r['Email'] + ')' : '');
+  if (r['Refunded at']) {
+    ui.alert('Already refunded', who + ' was refunded on ' + formatDay_(r['Refunded at']) + '.', ui.ButtonSet.OK);
+    return;
+  }
+  const where = r['City'] ? ', founding spot #' + r['City spot #'] + ' in ' + r['City'] : '';
+  const answer = ui.alert(
+    'Refund ' + money_(r['Amount'], r['Currency']) + '?',
+    who + where + '.\n\nThis refunds their payment in Stripe, frees their founding spot and emails them.',
+    ui.ButtonSet.YES_NO);
+  if (answer !== ui.Button.YES) return;
+
+  const result = refundReservation_(String(r['Stripe session ID'] || ''), 'You (Sheet menu)');
+  if (result.ok) {
+    ui.alert('Refunded', who + ' will get ' + money_(result.amount, result.currency) + ' back in 5–10 business days. The Refunds tab has the details.', ui.ButtonSet.OK);
+  } else {
+    ui.alert('Not refunded', 'Stripe didn\'t refund this payment' + (result.message ? ': ' + result.message : '.') +
+      '\n\nIf it mentions permissions, give your Stripe key "Refunds: Write".', ui.ButtonSet.OK);
+  }
+}
+
+// Refund page (refund.html): who is this link for, and is it refundable?
+function refundStatus_(ref, t) {
+  const found = findByRefundLink_(ref, t);
+  if (!found) return { ok: false, error: 'bad_link' };
+  const r = found.data;
+  return {
+    ok: true,
+    status: r['Refunded at'] ? 'refunded' : 'active',
+    refundsOpen: !!CONFIG.SELF_SERVE_REFUNDS,
+    firstName: String(r['First name'] || ''),
+    city: String(r['City'] || ''),
+    spot: r['City spot #'] || '',
+    amount: Number(r['Amount']) || 0,
+    currency: String(r['Currency'] || 'USD').toUpperCase(),
+    refundedAt: r['Refunded at'] ? formatDay_(r['Refunded at']) : ''
+  };
+}
+
+// Refund page: the person clicked "Refund".
+function selfServeRefund_(ref, t) {
+  const found = findByRefundLink_(ref, t);
+  if (!found) return { ok: false, error: 'bad_link' };
+  const r = found.data;
+  if (r['Refunded at']) return { ok: true, already: true, amount: Number(r['Amount']) || 0, currency: String(r['Currency'] || 'USD').toUpperCase() };
+  if (!CONFIG.SELF_SERVE_REFUNDS) return { ok: false, error: 'refunds_closed' };
+  const result = refundReservation_(String(r['Stripe session ID'] || ''), 'Customer (refund link)');
+  if (!result.ok) return { ok: false, error: result.error === 'not_found' ? 'bad_link' : 'refund_failed' }; // no Stripe details to visitors
+  return { ok: true, already: !!result.already, amount: result.amount, currency: result.currency };
+}
+
+// Refunds one reservation in Stripe and records it. Safe to call twice.
+function refundReservation_(sessionId, by) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
+    const found = sessionId ? findRow_(sheet, 'Stripe session ID', sessionId) : null;
+    if (!found) return { ok: false, error: 'not_found' };
+    const r = rowObject_(sheet, found.values);
+    const amount = Number(r['Amount']) || 0;
+    const currency = String(r['Currency'] || 'USD').toUpperCase();
+    if (r['Refunded at']) return { ok: true, already: true, amount: amount, currency: currency };
+
+    let pi = String(r['Stripe payment intent'] || '');
+    if (!pi) {
+      const s = stripeGet_('/v1/checkout/sessions/' + encodeURIComponent(sessionId));
+      pi = s && !s.error ? (typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent && s.payment_intent.id) || '') : '';
+    }
+    if (!pi) return { ok: false, error: 'refund_failed', message: 'No payment found for this reservation.' };
+
+    // The idempotency key makes Stripe return the same refund if this runs
+    // twice, so a payment is never refunded twice.
+    let refund = stripePost_('/v1/refunds', {
+      payment_intent: pi,
+      reason: 'requested_by_customer',
+      'metadata[app]': APP_TAG,
+      'metadata[ref]': String(r['Reference'] || '')
+    }, 'showup-refund-' + sessionId);
+
+    if (refund && refund.error && refund.error.code === 'charge_already_refunded') {
+      refund = { id: '(already refunded in Stripe)', amount: Math.round(amount * 100), currency: currency.toLowerCase(), payment_intent: pi };
+    }
+    if (!refund || refund.error || !refund.id) {
+      console.error('Stripe refund failed', refund && refund.error);
+      return { ok: false, error: 'refund_failed', message: (refund && refund.error && refund.error.message) || '' };
+    }
+    recordRefund_(sheet, found.row, r, refund, by);
+    return { ok: true, amount: amount, currency: currency };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Marks the reservation refunded (freeing the spot), logs it in the Refunds
+// tab, updates Checkout started, and emails the person.
+function recordRefund_(sheet, rowNumber, r, refund, by) {
+  const now = new Date();
+  setCell_(sheet, rowNumber, 'Refunded at', now);
+  setCell_(sheet, rowNumber, 'Refunded by', by);
+
+  const started = getSheet_(CONFIG.STARTED_SHEET, STARTED_HEADERS);
+  const lead = r['Reference'] ? findRow_(started, 'Reference', r['Reference']) : null;
+  if (lead) setCell_(started, lead.row, 'Status', 'Refunded');
+
+  const log = getSheet_(CONFIG.REFUNDS_SHEET, REFUND_HEADERS);
+  log.appendRow(refundLogRow_(now, r, refund, by, CONFIRMATION_EMAIL.ENABLED ? 'Sending…' : ''));
+  if (CONFIRMATION_EMAIL.ENABLED) setCell_(log, log.getLastRow(), 'Refund email', sendRefundEmail_(r, refund));
+}
+
+function refundLogRow_(when, r, refund, by, emailStatus) {
+  return [
+    when,
+    clean_(r['Reference'], 20),
+    clean_(r['First name'], 60),
+    clean_(r['Email'], 254),
+    clean_(r['City'], 80),
+    r['City spot #'] || '',
+    (Number(refund.amount) || 0) / 100,
+    String(refund.currency || r['Currency'] || '').toUpperCase(),
+    clean_(refund.id, 60),
+    clean_(refund.payment_intent || r['Stripe payment intent'], 60),
+    by,
+    emailStatus
+  ];
+}
+
+// Part of the 15-minute sync: records refunds you made in the Stripe
+// Dashboard, so the Sheet and the founding-spot counter stay right.
+function syncRefunds_() {
+  const since = Math.floor(Date.now() / 1000) - CONFIG.SYNC_LOOKBACK_DAYS * 86400;
+  let startingAfter = '';
+  let pages = 0;
+  do {
+    let path = '/v1/refunds?limit=100&created[gte]=' + since;
+    if (startingAfter) path += '&starting_after=' + encodeURIComponent(startingAfter);
+    const page = stripeGet_(path);
+    if (!page || page.error || !Array.isArray(page.data)) return;
+
+    page.data.forEach(function (refund) {
+      if (refund.status !== 'succeeded' && refund.status !== 'pending') return;
+      const pi = typeof refund.payment_intent === 'string' ? refund.payment_intent : '';
+      if (!pi) return;
+      const lock = LockService.getScriptLock();
+      lock.waitLock(20000);
+      try {
+        const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
+        const found = findRow_(sheet, 'Stripe payment intent', pi);
+        if (!found) return; // not a ShowUp reservation
+        const log = getSheet_(CONFIG.REFUNDS_SHEET, REFUND_HEADERS);
+        if (findRow_(log, 'Stripe refund ID', refund.id)) return; // already recorded
+        const r = rowObject_(sheet, found.values);
+        if (r['Refunded at']) return;
+        const paid = Math.round((Number(r['Amount']) || 0) * 100);
+        if (refund.amount >= paid) {
+          recordRefund_(sheet, found.row, r, refund, 'Stripe Dashboard');
+        } else {
+          // Partial refund: log it, but they keep their spot.
+          log.appendRow(refundLogRow_(new Date(), r, refund, 'Stripe Dashboard (partial, spot kept)', 'Not sent (partial refund)'));
+        }
+      } finally {
+        lock.releaseLock();
+      }
+    });
+
+    startingAfter = page.has_more && page.data.length ? page.data[page.data.length - 1].id : '';
+    pages++;
+  } while (startingAfter && pages < 10);
+}
+
+function refundUrl_(ref, sessionId) {
+  return siteUrl_() + 'refund.html?ref=' + encodeURIComponent(ref) + '&t=' + refundToken_(ref, sessionId);
+}
+
+// A private, unguessable token for each reservation's refund link.
+function refundToken_(ref, sessionId) {
+  const sig = Utilities.computeHmacSha256Signature(String(ref) + ':' + String(sessionId || ''), getRefundSecret_());
+  return Utilities.base64EncodeWebSafe(sig).slice(0, 32);
+}
+
+function findByRefundLink_(ref, t) {
+  if (!/^SU-[A-Z0-9]{6,12}$/.test(ref) || !/^[A-Za-z0-9_-]{32}$/.test(t)) return null;
+  const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
+  const found = findRow_(sheet, 'Reference', ref);
+  if (!found) return null;
+  const data = rowObject_(sheet, found.values);
+  if (!safeEqual_(refundToken_(ref, data['Stripe session ID']), t)) return null;
+  return { row: found.row, data: data };
+}
+
+function getRefundSecret_() {
+  const props = PropertiesService.getScriptProperties();
+  let secret = props.getProperty('REFUND_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('REFUND_SECRET', secret);
+  }
+  return secret;
+}
+
+function safeEqual_(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 /* =============================================================
@@ -597,11 +987,13 @@ function stripeGet_(path) {
 }
 
 // Form-encoded POST to the Stripe API. No Stripe-Version header: the account's
-// default API version is used.
-function stripePost_(path, params) {
+// default API version is used. idempotencyKey (optional) makes retries safe.
+function stripePost_(path, params, idempotencyKey) {
+  const headers = { Authorization: 'Bearer ' + getStripeKey_() };
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
   const res = UrlFetchApp.fetch('https://api.stripe.com' + path, {
     method: 'post',
-    headers: { Authorization: 'Bearer ' + getStripeKey_() },
+    headers: headers,
     payload: params,
     muteHttpExceptions: true
   });

@@ -280,7 +280,8 @@
       var data = collect(form);
       data.ref = makeRef();
       data.startedAt = new Date().toISOString();
-      saveLocal(data);
+      // Only what the success page needs to greet them (see privacy.html).
+      saveLocal({ firstName: data.firstName, city: data.city, ref: data.ref });
 
       btn.classList.add("is-loading");
       btn.setAttribute("aria-busy", "true");

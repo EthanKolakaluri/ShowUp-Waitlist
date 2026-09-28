@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>You're in · ShowUp</title>
+  <title>Refund your reservation · ShowUp</title>
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#FBF6EE">
   <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="assets/css/styles.css">
   <script src="assets/js/config.js"></script>
   <script defer src="assets/js/pages.js"></script>
-  <script defer src="assets/js/success.js"></script>
+  <script defer src="assets/js/refund.js"></script>
 </head>
 <body>
   <header class="nav is-scrolled">
@@ -25,42 +25,54 @@
     </div>
   </header>
 
-  <main class="success">
+  <main class="success refund">
     <div class="wrap">
-      <!-- Checking payment -->
+      <!-- Looking up the reservation -->
       <section class="state card success__card" id="state-checking" aria-live="polite">
         <div class="loader" aria-hidden="true"></div>
-        <h1>Confirming your spot…</h1>
+        <h1>Finding your reservation…</h1>
+        <p class="success__lead">One moment.</p>
+      </section>
+
+      <!-- Confirm the refund -->
+      <section class="state card success__card" id="state-confirm" hidden aria-live="polite">
+        <svg class="success__pin" viewBox="0 0 100 124" aria-hidden="true"><path d="M50 121C36 104 8 80 8 47C8 23.8 26.8 5 50 5C73.2 5 92 23.8 92 47C92 80 64 104 50 121Z" fill="#FF5B35"/><circle cx="36" cy="37" r="6.5" fill="#FFFDF9"/><circle cx="64" cy="37" r="6.5" fill="#FFFDF9"/><path d="M37 59H63" fill="none" stroke="#FFFDF9" stroke-width="8" stroke-linecap="round"/></svg>
+        <h1 id="confirm-title">Refund your reservation?</h1>
+        <p class="success__lead" id="confirm-lead">You'll get your money back on the card you paid with.</p>
+        <ul class="refund__facts" id="confirm-facts"></ul>
+        <div class="success__actions">
+          <a class="btn btn--primary" href="./">Keep my spot</a>
+          <button class="btn btn--ghost" type="button" id="refund-btn">Refund my reservation</button>
+        </div>
+        <p class="success__fine">Full details in our <a href="refunds.html">refund policy</a>.</p>
+      </section>
+
+      <!-- Refunding -->
+      <section class="state card success__card" id="state-working" hidden aria-live="polite">
+        <div class="loader" aria-hidden="true"></div>
+        <h1>Refunding…</h1>
         <p class="success__lead">This takes a few seconds. Please keep this page open.</p>
       </section>
 
-      <!-- Confirmed -->
+      <!-- Refunded -->
       <section class="state card success__card" id="state-done" hidden aria-live="polite">
         <svg class="success__pin" viewBox="0 0 100 124" aria-hidden="true"><g class="pin"><path d="M50 121C36 104 8 80 8 47C8 23.8 26.8 5 50 5C73.2 5 92 23.8 92 47C92 80 64 104 50 121Z" fill="#FF5B35"/><circle cx="36" cy="37" r="6.5" fill="#FFFDF9"/><circle cx="64" cy="37" r="6.5" fill="#FFFDF9"/><path d="M32 53C36 63 43 67 50 67C57 67 64 63 68 53" fill="none" stroke="#FFFDF9" stroke-width="9" stroke-linecap="round"/></g></svg>
-        <h1 id="done-title">You're in.</h1>
-        <p class="success__lead" id="done-lead">Your Founding 500 spot is reserved. Your <span class="price-label">$9.99</span> also covers your first month after launch, so there's nothing else to pay until month two.</p>
-        <div class="success__meta" id="done-meta"></div>
-        <ol class="success__next">
-          <li><b>1</b><span>Check your inbox for your confirmation email.</span></li>
-          <li><b>2</b><span>We'll email you before launch to finish your match quiz.</span></li>
-          <li><b>3</b><span>At launch, you get your crew and your first AI-planned hangout.</span></li>
-        </ol>
+        <h1 id="done-title">You're refunded.</h1>
+        <p class="success__lead" id="done-lead">Your money is on its way back to your card. It usually shows up in 5–10 business days.</p>
         <div class="success__actions">
           <a class="btn btn--primary" href="./">Back to ShowUp</a>
-          <button class="btn btn--ghost" type="button" id="share-btn">Invite a friend</button>
         </div>
-        <p class="success__fine" id="refund-note" hidden>Changed your mind? You can <a id="refund-link" href="refunds.html">get a full refund</a> anytime before launch.</p>
+        <p class="success__fine">Changed your mind again? You can <a href="./#reserve">reserve a spot</a> while founding spots last.</p>
       </section>
 
-      <!-- Not confirmed -->
-      <section class="state card success__card" id="state-error" hidden aria-live="polite">
+      <!-- Can't refund / something went wrong -->
+      <section class="state card success__card" id="state-message" hidden aria-live="polite">
         <svg class="success__pin" viewBox="0 0 100 124" aria-hidden="true"><path d="M50 121C36 104 8 80 8 47C8 23.8 26.8 5 50 5C73.2 5 92 23.8 92 47C92 80 64 104 50 121Z" fill="#FFE4D9"/><circle cx="36" cy="37" r="6.5" fill="#C8401C"/><circle cx="64" cy="37" r="6.5" fill="#C8401C"/><path d="M36 62C39 57 44 55 50 55C56 55 61 57 64 62" fill="none" stroke="#C8401C" stroke-width="8" stroke-linecap="round"/></svg>
-        <h1 id="error-title">We couldn't confirm your payment</h1>
-        <p class="success__lead" id="error-lead">If you were charged, don't worry: your spot is safe and we'll match your payment up shortly.</p>
-        <p class="success__lead" id="error-contact" hidden></p>
+        <h1 id="msg-title">This refund link doesn't work</h1>
+        <p class="success__lead" id="msg-lead">Use the link in your confirmation email.</p>
         <div class="success__actions">
-          <a class="btn btn--primary" href="./#reserve">Back to the reservation form</a>
-          <button class="btn btn--ghost" type="button" id="retry-btn">Try again</button>
+          <a class="btn btn--primary" href="./">Back to ShowUp</a>
+          <button class="btn btn--ghost" type="button" id="msg-retry" hidden>Try again</button>
         </div>
       </section>
     </div>

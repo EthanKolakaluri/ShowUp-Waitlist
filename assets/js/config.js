@@ -13,8 +13,15 @@ window.SHOWUP_CONFIG = {
   // Looks like: "https://script.google.com/macros/s/xxxxxxxx/exec"
   SHEETS_WEB_APP_URL: "https://script.google.com/macros/s/AKfycbxguxZi3bknVVr6KeDVV8QBTxEiAopRP3J3dk9AaJ8ivSBafdfVF1J5OxmwMN8bd03T/exec",
 
-  // Where people can reach you (shown in the footer and on errors).
+  // Where people can reach you (shown in the footer, on errors and in the
+  // Terms, Privacy and Refund policy pages).
   CONTACT_EMAIL: "",
+
+  // Used in the Terms, Privacy and Refund policy pages.
+  // Your business's legal name (or your own full name if you haven't
+  // formed a company yet), and the US state whose laws apply.
+  LEGAL_NAME: "",
+  GOVERNING_STATE: "",
 
   // Price shown on the page. Must match your Stripe Price.
   PRICE_LABEL: "$9.99",

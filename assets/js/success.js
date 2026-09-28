@@ -50,6 +50,7 @@
   }
 
   function done(info) {
+    if (info && info.refunded) { fail("refunded"); return; }
     var local = readLocal() || {};
     var name = (info && info.firstName) || local.firstName;
     var city = (info && info.city) || local.city;
@@ -58,6 +59,11 @@
     else if (isSet(city)) addChip("Founding member · " + city);
     if (info && info.ref) addChip("Ref " + info.ref);
     else if (isSet(local.ref)) addChip("Ref " + local.ref);
+    // Private refund link (only while self-serve refunds are open).
+    if (info && isSet(info.refundToken) && isSet(info.ref)) {
+      $("#refund-link").href = "refund.html?ref=" + encodeURIComponent(info.ref) + "&t=" + encodeURIComponent(info.refundToken);
+      $("#refund-note").hidden = false;
+    }
     show("#state-done");
     confetti();
   }
@@ -65,11 +71,16 @@
   function fail(reason) {
     var titles = {
       not_paid: "Your payment isn't complete yet",
-      missing_session: "We couldn't find your checkout"
+      missing_session: "We couldn't find your checkout",
+      refunded: "This reservation was refunded"
     };
     if (titles[reason]) $("#error-title").textContent = titles[reason];
     if (reason === "missing_session") {
       $("#error-lead").textContent = "This page opens after checkout. If you haven't reserved yet, head back to the form.";
+    }
+    if (reason === "refunded") {
+      $("#error-lead").textContent = "Your refund is on its way to your card. Changed your mind? You can reserve again while founding spots last.";
+      $("#retry-btn").hidden = true;
     }
     if (isSet(CFG.CONTACT_EMAIL)) {
       var c = $("#error-contact");
