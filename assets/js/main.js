@@ -228,11 +228,18 @@
     };
   }
 
-  function checkoutUrl(data) {
-    var base = CFG.STRIPE_PAYMENT_LINK.trim();
-    var sep = base.indexOf("?") > -1 ? "&" : "?";
-    return base + sep + "client_reference_id=" + encodeURIComponent(data.ref) +
-      "&prefilled_email=" + encodeURIComponent(data.email);
+  function stopLoading(btn) {
+    btn.classList.remove("is-loading");
+    btn.removeAttribute("aria-busy");
+  }
+
+  function checkoutErrorMessage(res) {
+    var contact = isSet(CFG.CONTACT_EMAIL) ? " If it keeps happening, email " + CFG.CONTACT_EMAIL + "." : "";
+    if (res && (res.error === "server_not_configured" || res.error === "checkout_not_configured")) {
+      return "Checkout isn't set up yet. Finish the steps in STRIPE_INTEGRATION_TODO.md.";
+    }
+    if (res && res.error === "bad_email") return "That email doesn't look right. Please check it and try again.";
+    return "We couldn't open checkout just now. Please try again in a moment." + contact;
   }
 
   function initForm() {
@@ -251,8 +258,8 @@
       showFormError("");
       if (!validate(form)) { showFormError("Please fill in the highlighted fields."); return; }
 
-      if (!isSet(CFG.STRIPE_PAYMENT_LINK)) {
-        showFormError("Checkout isn't connected yet. Add your Stripe Payment Link in assets/js/config.js.");
+      if (!isSet(CFG.SHEETS_WEB_APP_URL)) {
+        showFormError("Checkout isn't connected yet. Add your Apps Script URL in assets/js/config.js.");
         return;
       }
 
@@ -264,9 +271,10 @@
       btn.classList.add("is-loading");
       btn.setAttribute("aria-busy", "true");
 
-      // Log the checkout start in the Sheet, but never block payment on it.
+      // The Apps Script logs the checkout start in the Sheet and creates the
+      // Stripe Checkout Session, then we send the visitor to Stripe's page.
       var payload = {
-        action: "start",
+        action: "checkout",
         ref: data.ref,
         firstName: data.firstName,
         email: data.email,
@@ -275,16 +283,18 @@
         interests: data.interests,
         page: window.location.href.split("#")[0]
       };
-      withTimeout(postToSheet(payload), 4000).then(function () {
-        window.location.href = checkoutUrl(data);
+      withTimeout(postToSheet(payload), 20000).then(function (res) {
+        if (res && res.ok && typeof res.url === "string" && /^https:\/\//.test(res.url)) {
+          window.location.href = res.url;
+          return;
+        }
+        stopLoading(btn);
+        showFormError(checkoutErrorMessage(res));
       });
     });
 
     // Restore the button if the user comes back with the browser's back button.
-    window.addEventListener("pageshow", function () {
-      btn.classList.remove("is-loading");
-      btn.removeAttribute("aria-busy");
-    });
+    window.addEventListener("pageshow", function () { stopLoading(btn); });
   }
 
   document.documentElement.classList.remove("no-js");
