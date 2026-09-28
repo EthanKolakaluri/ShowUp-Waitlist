@@ -1,3 +1,8 @@
+/** @OnlyCurrentDoc */
+// ↑ Limits this script to the spreadsheet it's attached to, so it can't open
+//   any of your other Google Sheets.
+
+
 /**
  * ShowUp waitlist — Google Sheets backend (Google Apps Script)
  * ---------------------------------------------------------------
@@ -18,6 +23,17 @@
  *     secret key). GitHub secrets can't reach this script, so it goes here.
  *   - Replace the placeholders in the CONFIG block below, run setup() once,
  *     then deploy as a Web app (Execute as: Me, Who has access: Anyone).
+ *
+ * Security
+ *   - Limited to this spreadsheet (@OnlyCurrentDoc above).
+ *   - The Stripe key stays in Script properties; nothing here returns it.
+ *   - Price, success and cancel URLs are fixed here, never taken from visitors.
+ *   - Reservations are only written after Stripe confirms the payment.
+ *   - Rate limits (RATE_LIMITS below) stop spam from filling the Sheet or
+ *     using up Google's daily quota for outside requests.
+ *   - Stripe error details are logged here, never shown to visitors.
+ *   - Keep edit access to this Sheet to yourself: editors can see the script
+ *     and its Script properties.
  */
 
 const CONFIG = {
@@ -44,6 +60,14 @@ const CONFIG = {
 
   STARTED_SHEET: 'Checkout started',
   RESERVATIONS_SHEET: 'Reservations'
+};
+
+// Anti-spam limits. Generous for real visitors, tight enough to stop a script
+// from flooding the Sheet or using up the daily outside-request quota.
+const RATE_LIMITS = {
+  CHECKOUTS_PER_EMAIL_PER_HOUR: 5,     // one person retrying checkout
+  CHECKOUTS_PER_10_MIN: 120,           // everyone combined
+  CONFIRMS_PER_10_MIN: 300             // success-page checks, everyone combined
 };
 
 // Checkout Session settings — exactly as configured in Stripe Checkout Studio.
@@ -95,8 +119,10 @@ function doPost(e) {
   }
   try {
     if (body.action === 'checkout') return json_(createCheckout_(body));
-    if (body.action === 'start') return json_(recordStart_(body));
-    if (body.action === 'confirm') return json_(confirmSession_(String(body.session_id || ''), 'Success page'));
+    if (body.action === 'confirm') {
+      if (rateLimited_('confirm', RATE_LIMITS.CONFIRMS_PER_10_MIN, 600)) return json_({ ok: false, error: 'rate_limited' });
+      return json_(confirmSession_(String(body.session_id || ''), 'Success page'));
+    }
     return json_({ ok: false, error: 'unknown_action' });
   } catch (err) {
     console.error(err);
@@ -142,6 +168,13 @@ function createCheckout_(b) {
   if (!getStripeKey_()) return { ok: false, error: 'server_not_configured' };
   if (!isCheckoutConfigured_()) return { ok: false, error: 'checkout_not_configured' };
 
+  const email = String(b.email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254) return { ok: false, error: 'bad_email' };
+  if (rateLimited_('checkout', RATE_LIMITS.CHECKOUTS_PER_10_MIN, 600) ||
+      rateLimited_('email:' + hash_(email), RATE_LIMITS.CHECKOUTS_PER_EMAIL_PER_HOUR, 3600)) {
+    return { ok: false, error: 'rate_limited' };
+  }
+
   const started = recordStart_(b);
   if (!started.ok) return started;
 
@@ -161,7 +194,7 @@ function createCheckout_(b) {
   const session = stripePost_('/v1/checkout/sessions', params);
   if (!session || session.error || !session.url) {
     console.error('Stripe Checkout Session create failed', session && session.error);
-    return { ok: false, error: 'stripe_error', message: (session && session.error && session.error.message) || '' };
+    return { ok: false, error: 'stripe_error' };
   }
   return { ok: true, ref: started.ref, url: session.url };
 }
@@ -382,6 +415,23 @@ function rowObject_(sheet, values) {
   const obj = {};
   headers.forEach(function (h, i) { obj[h] = values[i]; });
   return obj;
+}
+
+// Counts requests in a fixed time window using the script cache.
+// Returns true once the limit is passed. (Approximate by design: good enough
+// to stop floods without slowing real visitors down.)
+function rateLimited_(name, limit, windowSeconds) {
+  const cache = CacheService.getScriptCache();
+  const key = 'rl:' + name + ':' + Math.floor(Date.now() / 1000 / windowSeconds);
+  const count = Number(cache.get(key) || 0) + 1;
+  cache.put(key, String(count), Math.min(windowSeconds + 60, 21600));
+  return count > limit;
+}
+
+// Short one-way hash so email addresses aren't stored in the cache.
+function hash_(text) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8);
+  return Utilities.base64EncodeWebSafe(bytes).slice(0, 32);
 }
 
 // Trim, cap length, and stop spreadsheet formula injection.
