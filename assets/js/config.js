@@ -1,12 +1,12 @@
 /*
- * VibeSwift waitlist — site settings
+ * ShowUp waitlist — site settings
  * ------------------------------------------------------------
  * Fill in the empty fields below. Everything else can stay as is.
  * This file is public (it ships with the website), so NEVER put
  * secret keys here. Your Stripe secret key goes in Google Apps Script
  * (see README.md, step 2).
  */
-window.VIBESWIFT_CONFIG = {
+window.SHOWUP_CONFIG = {
   // Google Apps Script web app URL (from Deploy → New deployment → Web app).
   // This one URL creates the Stripe Checkout, confirms payments and writes
   // to your Google Sheet.

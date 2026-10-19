@@ -1,10 +1,10 @@
-/* VibeSwift waitlist — shared bits for the success, refund and policy pages:
+/* ShowUp waitlist — shared bits for the success, refund and policy pages:
    footer year + contact link, price labels, and the fill-in fields on the
    policy pages (set them in assets/js/config.js). */
 (function () {
   "use strict";
 
-  var CFG = window.VIBESWIFT_CONFIG || {};
+  var CFG = window.SHOWUP_CONFIG || {};
   function isSet(v) { return typeof v === "string" && v.trim() !== ""; }
   function all(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
 

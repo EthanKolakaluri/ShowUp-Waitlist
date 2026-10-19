@@ -1,9 +1,9 @@
-/* VibeSwift waitlist — payment confirmation page */
+/* ShowUp waitlist — payment confirmation page */
 (function () {
   "use strict";
 
-  var CFG = window.VIBESWIFT_CONFIG || {};
-  var STORE_KEY = "vibeswift_reservation";
+  var CFG = window.SHOWUP_CONFIG || {};
+  var STORE_KEY = "showup_reservation";
 
   function $(sel) { return document.querySelector(sel); }
   function isSet(v) { return typeof v === "string" && v.trim() !== ""; }

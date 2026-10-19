@@ -1,11 +1,11 @@
-/* VibeSwift waitlist — self-serve refund page (refund.html?ref=…&t=…)
+/* ShowUp waitlist — self-serve refund page (refund.html?ref=…&t=…)
    The link comes from the confirmation email or the success page. The
    Apps Script checks the link's signature before showing or refunding
    anything, and makes the refund in Stripe. */
 (function () {
   "use strict";
 
-  var CFG = window.VIBESWIFT_CONFIG || {};
+  var CFG = window.SHOWUP_CONFIG || {};
   var STATES = ["#state-checking", "#state-confirm", "#state-working", "#state-done", "#state-message"];
   var params = new URLSearchParams(window.location.search);
   var ref = params.get("ref") || "";
@@ -116,7 +116,7 @@
     $("#refund-btn").addEventListener("click", refund);
     $("#msg-retry").addEventListener("click", load);
     if (!isSet(CFG.SHEETS_WEB_APP_URL)) { message("failed"); return; }
-    if (!/^(VS|SU)-[A-Z0-9]{6,12}$/.test(ref) || !/^[A-Za-z0-9_-]{32}$/.test(token)) { message("bad_link"); return; }
+    if (!/^SU-[A-Z0-9]{6,12}$/.test(ref) || !/^[A-Za-z0-9_-]{32}$/.test(token)) { message("bad_link"); return; }
     load();
   }
 

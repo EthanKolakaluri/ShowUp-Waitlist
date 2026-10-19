@@ -4,7 +4,7 @@
 
 
 /**
- * VibeSwift waitlist — Google Sheets backend (Google Apps Script)
+ * ShowUp waitlist — Google Sheets backend (Google Apps Script)
  * ---------------------------------------------------------------
  * What it does
  *   1. Creates the Stripe Checkout Session when someone submits the form,
@@ -19,7 +19,7 @@
  *      stops new checkouts once they're all taken.
  *   5. Refunds: people can refund themselves before launch from a private
  *      link in their email or on the success page, and you can refund anyone
- *      from the VibeSwift menu in the Sheet. Each refund is made in Stripe,
+ *      from the ShowUp menu in the Sheet. Each refund is made in Stripe,
  *      logged in the "Refunds" tab, frees the founding spot and emails them.
  *   6. A 15-minute sync catches anyone who paid but closed the tab before
  *      the success page loaded, records refunds made in the Stripe Dashboard,
@@ -76,7 +76,7 @@ const CONFIG = {
 
   // Let people refund themselves from the link in their email and on the
   // success page. Set to false at launch: after that, refunds go through the
-  // VibeSwift Guarantee and you issue them from the VibeSwift menu in the Sheet.
+  // Show-Up Guarantee and you issue them from the ShowUp menu in the Sheet.
   SELF_SERVE_REFUNDS: true,
 
   STARTED_SHEET: 'Checkout started',
@@ -112,16 +112,13 @@ const CHECKOUT_STUDIO_PARAMS = {
 // automatically on the next sync after the limit resets.
 const CONFIRMATION_EMAIL = {
   ENABLED: true,
-  FROM_NAME: 'VibeSwift',
+  FROM_NAME: 'ShowUp',
   // Where replies go. Leave empty to use your own Gmail address.
   REPLY_TO: 'showup128@gmail.com'
 };
 
-// Tag on every session this site creates, so the Sheet only counts VibeSwift
-// reservations. Sessions created before the rename carry the old tag and still count.
-const APP_TAG = 'vibeswift-waitlist';
-const LEGACY_APP_TAGS = ['showup-waitlist'];
-function isOurTag_(tag) { return tag === APP_TAG || LEGACY_APP_TAGS.indexOf(tag) > -1; }
+// Tag on every session this site creates, so the Sheet only counts ShowUp reservations.
+const APP_TAG = 'showup-waitlist';
 
 const STARTED_HEADERS = ['Started at', 'Reference', 'First name', 'Email', 'Age range', 'Interests', 'Status', 'Page'];
 const RESERVATION_HEADERS = ['Paid at', 'Reference', 'First name', 'Email', 'Age range', 'Interests', 'Spot #', 'Amount', 'Currency', 'Stripe session ID', 'Stripe payment intent', 'Confirmed by', 'Confirmation email', 'Refunded at', 'Refunded by'];
@@ -150,7 +147,7 @@ function setup() {
 function doGet(e) {
   const action = String((e && e.parameter && e.parameter.action) || '').toLowerCase();
   if (action === 'counts') return json_(getCounts_());
-  return json_({ ok: true, service: 'vibeswift-waitlist' });
+  return json_({ ok: true, service: 'showup-waitlist' });
 }
 
 function doPost(e) {
@@ -185,7 +182,7 @@ function doPost(e) {
 function recordStart_(b) {
   const ref = String(b.ref || '').trim();
   const email = String(b.email || '').trim();
-  if (!/^(VS|SU)-[A-Z0-9]{6,12}$/.test(ref)) return { ok: false, error: 'bad_ref' };
+  if (!/^SU-[A-Z0-9]{6,12}$/.test(ref)) return { ok: false, error: 'bad_ref' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254) return { ok: false, error: 'bad_email' };
 
   const lock = LockService.getScriptLock();
@@ -282,7 +279,7 @@ function confirmSession_(sessionId, source) {
 function validateSession_(s) {
   if (!s || s.error) return { ok: false, error: 'not_found' };
   if (s.payment_status !== 'paid') return { ok: false, error: 'not_paid' };
-  if (!s.metadata || !isOurTag_(s.metadata.app)) return { ok: false, error: 'not_our_session' };
+  if (!s.metadata || s.metadata.app !== APP_TAG) return { ok: false, error: 'not_showup_session' };
   if (CONFIG.EXPECTED_AMOUNT_CENTS && s.amount_total !== CONFIG.EXPECTED_AMOUNT_CENTS) return { ok: false, error: 'wrong_amount' };
   if (CONFIG.EXPECTED_CURRENCY && String(s.currency || '').toLowerCase() !== CONFIG.EXPECTED_CURRENCY) return { ok: false, error: 'wrong_currency' };
   return { ok: true };
@@ -292,7 +289,7 @@ function addReservation_(s, source) {
   const reservations = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
   const started = getSheet_(CONFIG.STARTED_SHEET, STARTED_HEADERS);
 
-  const ref = /^(VS|SU)-[A-Z0-9]{6,12}$/.test(String(s.client_reference_id || '')) ? s.client_reference_id : '';
+  const ref = /^SU-[A-Z0-9]{6,12}$/.test(String(s.client_reference_id || '')) ? s.client_reference_id : '';
   const lead = ref ? findRow_(started, 'Reference', ref) : null;
   const leadData = lead ? rowObject_(started, lead.values) : {};
   const details = s.customer_details || {};
@@ -393,7 +390,7 @@ function syncPaidCheckouts() {
     if (!page || page.error || !Array.isArray(page.data)) return;
 
     page.data.forEach(function (s) {
-      if (s.payment_status !== 'paid' || !s.metadata || !isOurTag_(s.metadata.app)) return;
+      if (s.payment_status !== 'paid' || !s.metadata || s.metadata.app !== APP_TAG) return;
       const lock = LockService.getScriptLock();
       lock.waitLock(20000);
       try {
@@ -414,19 +411,19 @@ function syncPaidCheckouts() {
    5. Emails
    ============================================================= */
 
-// Run from the editor (or VibeSwift menu) to see the email yourself. It goes
+// Run from the editor (or ShowUp menu) to see the email yourself. It goes
 // to your own Gmail. Its refund link is a sample and won't work.
 function sendTestEmail() {
   const to = Session.getEffectiveUser().getEmail();
   const status = sendConfirmation_({
     'Email': to, 'First name': 'Maya', 'Spot #': 12,
     'Amount': (CONFIG.EXPECTED_AMOUNT_CENTS || 999) / 100, 'Currency': 'USD',
-    'Reference': 'VS-TEST1234', 'Stripe session ID': 'cs_test_sample', 'Paid at': new Date()
+    'Reference': 'SU-TEST1234', 'Stripe session ID': 'cs_test_sample', 'Paid at': new Date()
   });
   Logger.log(status.indexOf('Sent') === 0 ? 'Test email sent to ' + to + '. Check your inbox (and spam).' : 'Test email not sent: ' + status);
 }
 
-// Run from the editor (or VibeSwift menu) to email everyone in Reservations
+// Run from the editor (or ShowUp menu) to email everyone in Reservations
 // whose "Confirmation email" cell is empty: people who reserved before emails
 // were turned on, or rows where you cleared the cell to send it again.
 function sendMissingConfirmationEmails() {
@@ -523,7 +520,7 @@ function confirmationMessage_(r) {
   const hello = name ? "You're in, " + name : "You're in";
   const subject = spot
     ? hello + '! Founding spot #' + spot + ' of ' + cap
-    : hello + '! Your VibeSwift spot is reserved';
+    : hello + '! Your ShowUp spot is reserved';
   const lead = 'Your founding spot is reserved. Your ' + price + ' also covers your first month after launch, so there\'s nothing else to pay until month two.';
   const spotLine = spot ? 'of ' + cap + ' founding spots' : '';
   const steps = [
@@ -532,8 +529,8 @@ function confirmationMessage_(r) {
     'From month two, Crew is ' + price + '/mo, locked in while you\'re a member.'
   ];
   const guarantee = "Go to 3 hangouts in your first 30 days. If you haven't met at least one person you want to see again, we refund your first month in full.";
-  const invite = 'mailto:?subject=' + encodeURIComponent('Come to VibeSwift with me') +
-    '&body=' + encodeURIComponent('I just reserved a founding spot on VibeSwift. It matches you with a crew and plans the hangouts for you. Grab a spot before they\'re gone: ' + site);
+  const invite = 'mailto:?subject=' + encodeURIComponent('Come to ShowUp with me') +
+    '&body=' + encodeURIComponent('I just reserved a founding spot on ShowUp. It matches you with a crew and plans the hangouts for you. Grab a spot before they\'re gone: ' + site);
   const refundUrl = CONFIG.SELF_SERVE_REFUNDS && ref ? refundUrl_(ref, r['Stripe session ID']) : '';
 
   const text = [
@@ -544,7 +541,7 @@ function confirmationMessage_(r) {
     'What happens next',
     steps.map(function (s, i) { return (i + 1) + '. ' + s; }).join('\n'),
     '',
-    'The VibeSwift Guarantee',
+    'The Show-Up Guarantee',
     guarantee,
     '',
     'Paid: ' + price + ' ' + currency,
@@ -556,35 +553,35 @@ function confirmationMessage_(r) {
     'Questions? Just reply to this email.',
     refundUrl ? 'Changed your mind? You can get a full refund anytime before launch: ' + refundUrl : '',
     '',
-    'VibeSwift'
+    'ShowUp'
   ].filter(function (line, i, all) { return line !== '' || all[i - 1] !== ''; }).join('\n');
 
   const body =
     (spotLine
-      ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFF3F4;border-radius:18px;margin:0 0 28px;"><tr>' +
-        '<td width="1" style="padding:18px 6px 18px 22px;font:800 44px/1 ' + F_HEAD + ';color:#E0102F;white-space:nowrap;">#' + esc_(spot) + '</td>' +
-        '<td style="padding:18px 22px 18px 10px;font:600 15px/1.4 ' + F_BODY + ';color:#24070C;">' + esc_(spotLine) + '</td>' +
+      ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFF0E8;border-radius:18px;margin:0 0 28px;"><tr>' +
+        '<td width="1" style="padding:18px 6px 18px 22px;font:800 44px/1 ' + F_HEAD + ';color:#FF5B35;white-space:nowrap;">#' + esc_(spot) + '</td>' +
+        '<td style="padding:18px 22px 18px 10px;font:600 15px/1.4 ' + F_BODY + ';color:#2B211C;">' + esc_(spotLine) + '</td>' +
         '</tr></table>'
       : '') +
-    '<h2 style="margin:0 0 12px;font:800 18px/1.3 ' + F_HEAD + ';color:#24070C;">What happens next</h2>' +
+    '<h2 style="margin:0 0 12px;font:800 18px/1.3 ' + F_HEAD + ';color:#2B211C;">What happens next</h2>' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;">' +
     steps.map(function (s, i) {
       return '<tr><td width="36" valign="top" style="padding:0 0 12px;">' +
-        '<div style="width:26px;height:26px;border-radius:13px;background:#E0102F;color:#FFFFFF;text-align:center;font:800 13px/26px ' + F_HEAD + ';">' + (i + 1) + '</div></td>' +
-        '<td valign="top" style="padding:3px 0 12px;font:15px/1.5 ' + F_BODY + ';color:#6B4A50;">' + esc_(s) + '</td></tr>';
+        '<div style="width:26px;height:26px;border-radius:13px;background:#FF5B35;color:#FFFDF9;text-align:center;font:800 13px/26px ' + F_HEAD + ';">' + (i + 1) + '</div></td>' +
+        '<td valign="top" style="padding:3px 0 12px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">' + esc_(s) + '</td></tr>';
     }).join('') +
     '</table>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:4px solid #E0102F;margin:0 0 26px;"><tr><td style="padding:2px 0 2px 16px;">' +
-    '<p style="margin:0 0 4px;font:800 16px/1.3 ' + F_HEAD + ';color:#24070C;">The VibeSwift Guarantee</p>' +
-    '<p style="margin:0;font:14px/1.55 ' + F_BODY + ';color:#6B4A50;">' + esc_(guarantee) + '</p>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:4px solid #FF5B35;margin:0 0 26px;"><tr><td style="padding:2px 0 2px 16px;">' +
+    '<p style="margin:0 0 4px;font:800 16px/1.3 ' + F_HEAD + ';color:#2B211C;">The Show-Up Guarantee</p>' +
+    '<p style="margin:0;font:14px/1.55 ' + F_BODY + ';color:#5C4F46;">' + esc_(guarantee) + '</p>' +
     '</td></tr></table>' +
     emailFacts_([['Paid', price + ' ' + currency], ['Date', date], ['Reference', ref]]) +
-    '<p style="margin:0 0 10px;font:15px/1.5 ' + F_BODY + ';color:#6B4A50;">Know someone who\'d come along?</p>' +
+    '<p style="margin:0 0 10px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">Know someone who\'d come along?</p>' +
     emailButton_('Invite a friend', invite);
 
   const footer = 'Questions? Just reply to this email.<br>' +
-    (refundUrl ? 'Changed your mind? You can get a full refund anytime before launch. <a href="' + esc_(refundUrl) + '" style="color:#B80D26;">Refund my reservation</a><br>' : '') +
-    'You\'re getting this because you reserved a founding spot at <a href="' + esc_(site) + '" style="color:#B80D26;">VibeSwift</a>.';
+    (refundUrl ? 'Changed your mind? You can get a full refund anytime before launch. <a href="' + esc_(refundUrl) + '" style="color:#C8401C;">Refund my reservation</a><br>' : '') +
+    'You\'re getting this because you reserved a founding spot at <a href="' + esc_(site) + '" style="color:#C8401C;">ShowUp</a>.';
 
   return {
     subject: subject,
@@ -610,7 +607,7 @@ function refundMessage_(r, refund) {
   const amount = refund && refund.amount ? refund.amount / 100 : r['Amount'];
   const price = money_(amount, currency);
 
-  const subject = 'Your VibeSwift reservation is refunded';
+  const subject = 'Your ShowUp reservation is refunded';
   const heading = name ? 'Your refund is on its way, ' + name + '.' : 'Your refund is on its way.';
   const lead = "We've refunded " + price + ' to the card you paid with. It usually shows up in 5–10 business days, depending on your bank.';
   const released = spot ? 'Founding spot #' + spot + ' has been released.' : 'Your founding spot has been released.';
@@ -628,13 +625,13 @@ function refundMessage_(r, refund) {
     'Changed your mind again? You can reserve a founding spot while they last: ' + site + '#reserve',
     '',
     'Questions? Just reply to this email.',
-    'VibeSwift'
+    'ShowUp'
   ].filter(function (line, i, all) { return line !== '' || all[i - 1] !== ''; }).join('\n');
 
   const body =
-    '<p style="margin:0 0 24px;font:600 15px/1.5 ' + F_BODY + ';color:#24070C;background:#FFF3F4;border-radius:14px;padding:14px 18px;">' + esc_(released) + '</p>' +
+    '<p style="margin:0 0 24px;font:600 15px/1.5 ' + F_BODY + ';color:#2B211C;background:#FFF0E8;border-radius:14px;padding:14px 18px;">' + esc_(released) + '</p>' +
     emailFacts_([['Refunded', price + ' ' + currency], ['Date', formatDay_(new Date())], ['Reference', ref]]) +
-    '<p style="margin:0 0 10px;font:15px/1.5 ' + F_BODY + ';color:#6B4A50;">Changed your mind again? Founding spots are open while they last.</p>' +
+    '<p style="margin:0 0 10px;font:15px/1.5 ' + F_BODY + ';color:#5C4F46;">Changed your mind again? Founding spots are open while they last.</p>' +
     emailButton_('Reserve again', site + '#reserve');
 
   return {
@@ -647,13 +644,13 @@ function refundMessage_(r, refund) {
       heading: heading,
       lead: lead,
       body: body,
-      footer: 'Questions? Just reply to this email.<br>You\'re getting this because you asked for a refund of your VibeSwift reservation.'
+      footer: 'Questions? Just reply to this email.<br>You\'re getting this because you asked for a refund of your ShowUp reservation.'
     })
   };
 }
 
-const F_HEAD = "'Syne','Arial Black','Helvetica Neue',Helvetica,Arial,sans-serif";
-const F_BODY = "'Instrument Sans','Helvetica Neue',Helvetica,Arial,sans-serif";
+const F_HEAD = "'Bricolage Grotesque','Helvetica Neue',Helvetica,Arial,sans-serif";
+const F_BODY = "'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif";
 
 // Shared email frame: logo, card, footer. Everything is inline-styled so it
 // looks the same in Gmail, Apple Mail and Outlook. o.body and o.footer are
@@ -663,36 +660,36 @@ function emailLayout_(o) {
   return '<!doctype html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only">' +
     '<title>' + esc_(o.title) + '</title>' +
-    '<link href="https://fonts.googleapis.com/css2?family=Syne:wght@800&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">' +
-    '</head><body style="margin:0;padding:0;background:#FFF3F4;">' +
+    '<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">' +
+    '</head><body style="margin:0;padding:0;background:#FBF6EE;">' +
     '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">' + esc_(o.preheader) + '</div>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFF3F4;"><tr><td align="center" style="padding:32px 16px;">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBF6EE;"><tr><td align="center" style="padding:32px 16px;">' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">' +
     '<tr><td style="padding:0 4px 20px;"><a href="' + esc_(site) + '" style="text-decoration:none;">' +
-    '<img src="' + esc_(site + 'assets/img/email-logo.png') + '" width="186" alt="vibeswift" style="display:block;border:0;width:186px;height:auto;font:800 28px ' + F_HEAD + ';color:#24070C;"></a></td></tr>' +
-    '<tr><td style="background:#FFFFFF;border:1px solid #F1D9DC;border-radius:24px;padding:36px 32px;">' +
-    '<p style="margin:0 0 14px;"><span style="display:inline-block;background:#FFD6DB;color:#B80D26;border-radius:999px;padding:5px 12px;font:600 12px/1 ' + F_BODY + ';letter-spacing:.08em;text-transform:uppercase;">' + esc_(o.eyebrow) + '</span></p>' +
-    '<h1 style="margin:0 0 12px;font:800 34px/1.1 ' + F_HEAD + ';color:#24070C;letter-spacing:-.02em;">' + esc_(o.heading) + '</h1>' +
-    '<p style="margin:0 0 24px;font:16px/1.6 ' + F_BODY + ';color:#6B4A50;">' + esc_(o.lead) + '</p>' +
+    '<img src="' + esc_(site + 'assets/img/email-logo.png') + '" width="132" alt="showup" style="display:block;border:0;width:132px;height:auto;font:800 28px ' + F_HEAD + ';color:#2B211C;"></a></td></tr>' +
+    '<tr><td style="background:#FFFDF9;border:1px solid #F0E4D7;border-radius:24px;padding:36px 32px;">' +
+    '<p style="margin:0 0 14px;"><span style="display:inline-block;background:#FFE4D9;color:#C8401C;border-radius:999px;padding:5px 12px;font:600 12px/1 ' + F_BODY + ';letter-spacing:.08em;text-transform:uppercase;">' + esc_(o.eyebrow) + '</span></p>' +
+    '<h1 style="margin:0 0 12px;font:800 34px/1.1 ' + F_HEAD + ';color:#2B211C;letter-spacing:-.02em;">' + esc_(o.heading) + '</h1>' +
+    '<p style="margin:0 0 24px;font:16px/1.6 ' + F_BODY + ';color:#5C4F46;">' + esc_(o.lead) + '</p>' +
     o.body +
     '</td></tr>' +
-    '<tr><td style="padding:22px 4px 0;font:13px/1.6 ' + F_BODY + ';color:#6B4A50;">' + o.footer + '</td></tr>' +
+    '<tr><td style="padding:22px 4px 0;font:13px/1.6 ' + F_BODY + ';color:#7A6A5F;">' + o.footer + '</td></tr>' +
     '</table></td></tr></table></body></html>';
 }
 
 function emailFacts_(pairs) {
   const rows = pairs.filter(function (p) { return p[1]; }).map(function (p) {
-    return '<tr><td style="padding:6px 0;font:14px/1.4 ' + F_BODY + ';color:#6B4A50;">' + esc_(p[0]) + '</td>' +
-      '<td align="right" style="padding:6px 0;font:600 14px/1.4 ' + F_BODY + ';color:#24070C;">' + esc_(p[1]) + '</td></tr>';
+    return '<tr><td style="padding:6px 0;font:14px/1.4 ' + F_BODY + ';color:#7A6A5F;">' + esc_(p[0]) + '</td>' +
+      '<td align="right" style="padding:6px 0;font:600 14px/1.4 ' + F_BODY + ';color:#2B211C;">' + esc_(p[1]) + '</td></tr>';
   }).join('');
   const gap = '<tr><td colspan="2" style="height:8px;line-height:8px;font-size:0;">&nbsp;</td></tr>';
-  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #F1D9DC;border-bottom:1px solid #F1D9DC;margin:0 0 28px;">' +
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #F0E4D7;border-bottom:1px solid #F0E4D7;margin:0 0 28px;">' +
     gap + rows + gap + '</table>';
 }
 
 function emailButton_(label, href) {
-  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#E0102F;border-radius:999px;">' +
-    '<a href="' + esc_(href) + '" style="display:inline-block;padding:13px 24px;font:600 15px/1 ' + F_BODY + ';color:#FFFFFF;text-decoration:none;">' + esc_(label) + '</a>' +
+  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#C8401C;border-radius:999px;">' +
+    '<a href="' + esc_(href) + '" style="display:inline-block;padding:13px 24px;font:600 15px/1 ' + F_BODY + ';color:#FFFDF9;text-decoration:none;">' + esc_(label) + '</a>' +
     '</td></tr></table>';
 }
 
@@ -722,12 +719,12 @@ function esc_(value) {
    6. Refunds
    ============================================================= */
 
-// Adds a "VibeSwift" menu to the Sheet each time you open it.
-// To refund someone (for example a VibeSwift Guarantee claim): open the
+// Adds a "ShowUp" menu to the Sheet each time you open it.
+// To refund someone (for example a Show-Up Guarantee claim): open the
 // Reservations tab, click any cell in their row, then
-// VibeSwift → Refund selected reservation.
+// ShowUp → Refund selected reservation.
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('VibeSwift')
+  SpreadsheetApp.getUi().createMenu('ShowUp')
     .addItem('Refund selected reservation', 'refundSelectedReservation')
     .addSeparator()
     .addItem('Send missing confirmation emails', 'sendMissingConfirmationEmails')
@@ -825,7 +822,7 @@ function refundReservation_(sessionId, by) {
       reason: 'requested_by_customer',
       'metadata[app]': APP_TAG,
       'metadata[ref]': String(r['Reference'] || '')
-    }, 'vibeswift-refund-' + sessionId);
+    }, 'showup-refund-' + sessionId);
 
     if (refund && refund.error && refund.error.code === 'charge_already_refunded') {
       refund = { id: '(already refunded in Stripe)', amount: Math.round(amount * 100), currency: currency.toLowerCase(), payment_intent: pi };
@@ -894,7 +891,7 @@ function syncRefunds_() {
       try {
         const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
         const found = findRow_(sheet, 'Stripe payment intent', pi);
-        if (!found) return; // not a VibeSwift reservation
+        if (!found) return; // not a ShowUp reservation
         const log = getSheet_(CONFIG.REFUNDS_SHEET, REFUND_HEADERS);
         if (findRow_(log, 'Stripe refund ID', refund.id)) return; // already recorded
         const r = rowObject_(sheet, found.values);
@@ -927,7 +924,7 @@ function refundToken_(ref, sessionId) {
 }
 
 function findByRefundLink_(ref, t) {
-  if (!/^(VS|SU)-[A-Z0-9]{6,12}$/.test(ref) || !/^[A-Za-z0-9_-]{32}$/.test(t)) return null;
+  if (!/^SU-[A-Z0-9]{6,12}$/.test(ref) || !/^[A-Za-z0-9_-]{32}$/.test(t)) return null;
   const sheet = getSheet_(CONFIG.RESERVATIONS_SHEET, RESERVATION_HEADERS);
   const found = findRow_(sheet, 'Reference', ref);
   if (!found) return null;

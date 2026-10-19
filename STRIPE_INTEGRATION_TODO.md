@@ -1,6 +1,6 @@
 # Stripe integration — to-do
 
-This is the single source of truth for finishing the Stripe setup on the VibeSwift waitlist site.
+This is the single source of truth for finishing the Stripe setup on the ShowUp waitlist site.
 
 The site uses **hosted Stripe Checkout**: when someone submits the reservation form, the Google Apps Script backend creates a Checkout Session and sends them to Stripe's payment page. After paying, Stripe sends them back to `success.html`, and the script confirms the payment with Stripe before adding them to the Google Sheet.
 
@@ -61,7 +61,7 @@ These parameters were configured in Checkout Studio and are already set correctl
 - **`ui_mode` and your API version.** The backend calls Stripe's REST API directly from Google Apps Script (there is no Stripe SDK), so no SDK version decides this. No `Stripe-Version` header is sent, so Stripe uses your account's default API version. `hosted_page` is the name in newer API versions; older versions call it `hosted`. If your first test checkout fails with an error mentioning `ui_mode`, change `ui_mode: 'hosted_page'` to `ui_mode: 'hosted'` in `CHECKOUT_STUDIO_PARAMS`.
 - **`origin_context` is `mobile_app`.** That's what Checkout Studio exported, but this is a website. If you meant to pick web, change it in Checkout Studio and update the value in `Code.gs` to match.
 
-**Added by the site (not from Checkout Studio):** `client_reference_id`, `customer_email`, `metadata[app]` and `metadata[ref]`. They pre-fill the buyer's email and link each payment back to their row in the Sheet. The backend only counts sessions tagged `metadata[app] = vibeswift-waitlist`, so other payments on your Stripe account never show up as reservations. Sessions created before the rename to VibeSwift carry `showup-waitlist` and still count, so nobody who already paid is lost.
+**Added by the site (not from Checkout Studio):** `client_reference_id`, `customer_email`, `metadata[app]` and `metadata[ref]`. They pre-fill the buyer's email and link each payment back to their row in the Sheet. The backend only counts sessions tagged `metadata[app] = showup-waitlist`, so other payments on your Stripe account never show up as reservations.
 
 ---
 
@@ -78,7 +78,7 @@ These parameters were configured in Checkout Studio and are already set correctl
 
 ### 2. Create the product
 
-1. Dashboard → **Product catalog → Add product**: "VibeSwift Founding 500 reservation".
+1. Dashboard → **Product catalog → Add product**: "ShowUp Founding 500 reservation".
 2. Pricing: **One-off**, **$9.99 USD**.
 3. Copy the Price ID (`price_…`) into `CONFIG.STRIPE_PRICE_ID` in `apps-script/Code.gs`.
 
@@ -91,7 +91,7 @@ Set `CONFIG.SUCCESS_URL` and `CONFIG.CANCEL_URL` in `apps-script/Code.gs` using 
 1. Create a Google Sheet, then **Extensions → Apps Script**.
 2. Paste all of `apps-script/Code.gs` (with your values filled in) and save.
 3. Add the `STRIPE_API_KEY` script property (step 1).
-4. Select `setup` in the toolbar and click **Run**, then approve permissions. Tick **Select all**: spreadsheets, external service, run when you're not present, send email as you, see your email address (only used by `sendTestEmail`), and display prompts inside Google apps (the VibeSwift menu's confirm boxes). This creates the **Checkout started**, **Reservations** and **Refunds** tabs, a secret for refund links (`REFUND_SECRET` in Script properties; don't share or change it, or existing refund links stop working) and a 15-minute sync.
+4. Select `setup` in the toolbar and click **Run**, then approve permissions. Tick **Select all**: spreadsheets, external service, run when you're not present, send email as you, see your email address (only used by `sendTestEmail`), and display prompts inside Google apps (the ShowUp menu's confirm boxes). This creates the **Checkout started**, **Reservations** and **Refunds** tabs, a secret for refund links (`REFUND_SECRET` in Script properties; don't share or change it, or existing refund links stop working) and a 15-minute sync.
    - Optional: select `sendTestEmail` and click **Run** to get the confirmation email in your own inbox.
 5. **Deploy → New deployment → Web app**, Execute as **Me**, Who has access **Anyone**. Copy the URL into `SHEETS_WEB_APP_URL` in `assets/js/config.js` and commit it to the repo.
 6. After any later change to `Code.gs`: run `setup` once (so Google can ask for any new permission), then **Deploy → Manage deployments → Edit → Version: New version**. The URL stays the same. If you skip the permission step after a change that needs a new one, the web app stops working until you approve it.
@@ -105,7 +105,7 @@ Repo **Settings → Pages → Deploy from a branch → `main` / `(root)`**. The 
 ```
 apps-script/Code.gs      Creates Checkout Sessions (action "checkout"), confirms payments,
                          writes the Sheet, sends the emails, makes refunds (actions
-                         "refund_status" and "refund", plus the VibeSwift menu in the Sheet),
+                         "refund_status" and "refund", plus the ShowUp menu in the Sheet),
                          15-minute sync. All Stripe calls live here.
 assets/js/config.js      SHEETS_WEB_APP_URL and site settings (no secrets)
 assets/js/main.js        Form → calls the Apps Script → redirects to Stripe Checkout
@@ -122,14 +122,14 @@ STRIPE_INTEGRATION_TODO.md  This file
 2. `main.js` sends the form to the Apps Script (`action: "checkout"`).
 3. The script logs them in **Checkout started**, then calls `POST /v1/checkout/sessions` with the Checkout Studio parameters, your Price, the success and cancel URLs, their email and a reference ID.
 4. The browser is sent to the session's Stripe-hosted `url`, and the visitor pays.
-5. Stripe redirects to `success.html?session_id=cs_…`. The page asks the script to confirm. The script fetches the session from Stripe, checks it's paid, tagged `vibeswift-waitlist`, $9.99 USD, then adds a **Reservations** row, marks the **Checkout started** row **Paid**, and emails them a "You're in" confirmation.
+5. Stripe redirects to `success.html?session_id=cs_…`. The page asks the script to confirm. The script fetches the session from Stripe, checks it's paid, tagged `showup-waitlist`, $9.99 USD, then adds a **Reservations** row, marks the **Checkout started** row **Paid**, and emails them a "You're in" confirmation.
 6. If someone closes the tab before step 5, the 15-minute sync finds their paid session on Stripe, adds them and emails them anyway.
 
 ### Refunds
 
 - **Self-serve, before launch.** The confirmation email and the success page carry a private link to `refund.html?ref=…&t=…`. The `t` part is a signature made with `REFUND_SECRET`, so a link only works for its own reservation. The page shows what they'll give up, then one click calls `POST /v1/refunds` for the payment (with an idempotency key, so it can't refund twice).
 - **What a refund does:** marks the **Reservations** row (**Refunded at**, **Refunded by**), adds a row to the **Refunds** tab, marks **Checkout started** as **Refunded**, frees the founding spot in the counter (spot numbers are never reused), and emails them a refund confirmation.
-- **You refunding someone** (for example a VibeSwift Guarantee claim): open the Sheet, go to **Reservations**, click any cell in their row, then **VibeSwift → Refund selected reservation**. The VibeSwift menu appears a few seconds after the Sheet opens.
+- **You refunding someone** (for example a Show-Up Guarantee claim): open the Sheet, go to **Reservations**, click any cell in their row, then **ShowUp → Refund selected reservation**. The ShowUp menu appears a few seconds after the Sheet opens.
 - **Refunds made in the Stripe Dashboard** are picked up by the 15-minute sync. A full refund frees the spot; a partial one is logged in **Refunds** and they keep their spot.
 - **At launch:** set `SELF_SERVE_REFUNDS: false` in `Code.gs` and deploy a new version. Refund links then say refunds by link have closed; the Sheet menu still works.
 
@@ -149,8 +149,8 @@ Use any future expiry date, any 3-digit CVC and any ZIP. After a successful paym
 
 - **Go live:** create the product and Price in live mode, then swap in the live Price ID and live secret key. Redeploy the Apps Script as a new version.
 - **Receipts:** the script sends the "You're in" email. For Stripe's own payment receipt as well, turn on **Settings → Customer emails → Successful payments** (Stripe only sends these in live mode).
-- **Confirmation emails:** they come from the Gmail account that owns the script, named "VibeSwift". Free Gmail accounts can email 100 people a day; anyone past that shows **Waiting (daily email limit)** in the Sheet and is emailed automatically once the limit resets. To resend one, clear its **Confirmation email** cell and run `sendMissingConfirmationEmails`. Settings are in `CONFIRMATION_EMAIL` in `Code.gs`.
-- **VibeSwift Guarantee refunds:** use **VibeSwift → Refund selected reservation** in the Sheet (see Refunds above).
+- **Confirmation emails:** they come from the Gmail account that owns the script, named "ShowUp". Free Gmail accounts can email 100 people a day; anyone past that shows **Waiting (daily email limit)** in the Sheet and is emailed automatically once the limit resets. To resend one, clear its **Confirmation email** cell and run `sendMissingConfirmationEmails`. Settings are in `CONFIRMATION_EMAIL` in `Code.gs`.
+- **Show-Up Guarantee refunds:** use **ShowUp → Refund selected reservation** in the Sheet (see Refunds above).
 - **Order tracking:** the **Reservations** tab is your list of paying founding members, numbered #1–500. Once 500 spots are held (refunds free a spot), checkout closes and the form says so. The Sheet reads and writes columns by their header names, so you can reorder or delete columns you don't need (like an old **City** column) without breaking anything.
 - **Before taking real money:** fill in `LEGAL_NAME`, `GOVERNING_STATE` and `CONTACT_EMAIL` in `config.js` (the policy pages highlight them until you do), and have someone qualified review the Terms, Privacy Policy and Refund Policy.
 
