@@ -1,9 +1,9 @@
-/* ShowUp waitlist — landing page behavior */
+/* VibeSwift waitlist — landing page behavior */
 (function () {
   "use strict";
 
-  var CFG = window.SHOWUP_CONFIG || {};
-  var STORE_KEY = "showup_reservation";
+  var CFG = window.VIBESWIFT_CONFIG || {};
+  var STORE_KEY = "vibeswift_reservation";
 
   /* ---------- Small helpers ---------- */
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -35,13 +35,13 @@
       return r.text().then(function (text) {
         try { return JSON.parse(text); }
         catch (e) {
-          console.error("[ShowUp] The Apps Script answered with a web page instead of data (HTTP " + r.status + "). " +
+          console.error("[VibeSwift] The Apps Script answered with a web page instead of data (HTTP " + r.status + "). " +
             "Check the deployment: Execute as Me, Who has access: Anyone.", text.slice(0, 300));
           return null;
         }
       });
     }).catch(function (err) {
-      console.error("[ShowUp] Couldn't reach the Apps Script web app. Most often the deployment's " +
+      console.error("[VibeSwift] Couldn't reach the Apps Script web app. Most often the deployment's " +
         "'Who has access' isn't set to Anyone, so Google shows a sign-in page. Open SHEETS_WEB_APP_URL + '?action=counts' " +
         "in a private window: it should show {\"ok\":true,...}.", err);
       return null;
@@ -55,7 +55,7 @@
     if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
     else for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
     for (var j = 0; j < bytes.length; j++) out += alphabet[bytes[j] % alphabet.length];
-    return "SU-" + out;
+    return "VS-" + out;
   }
 
   /* ---------- Config-driven labels ---------- */
@@ -254,7 +254,7 @@
           return;
         }
         stopLoading(btn);
-        if (res) console.error("[ShowUp] Checkout failed:", res.error || res);
+        if (res) console.error("[VibeSwift] Checkout failed:", res.error || res);
         showFormError(checkoutErrorMessage(res));
       });
     });

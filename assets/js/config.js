@@ -1,12 +1,12 @@
 /*
- * ShowUp waitlist — site settings
+ * VibeSwift waitlist — site settings
  * ------------------------------------------------------------
  * Fill in the empty fields below. Everything else can stay as is.
  * This file is public (it ships with the website), so NEVER put
  * secret keys here. Your Stripe secret key goes in Google Apps Script
  * (see README.md, step 2).
  */
-window.SHOWUP_CONFIG = {
+window.VIBESWIFT_CONFIG = {
   // Google Apps Script web app URL (from Deploy → New deployment → Web app).
   // This one URL creates the Stripe Checkout, confirms payments and writes
   // to your Google Sheet.
@@ -20,7 +20,7 @@ window.SHOWUP_CONFIG = {
   // Used in the Terms, Privacy and Refund policy pages.
   // Your business's legal name (or your own full name if you haven't
   // formed a company yet), and the US state whose laws apply.
-  LEGAL_NAME: "Ethan Kolakaluri, founder of ShowUp",
+  LEGAL_NAME: "Ethan Kolakaluri, founder of VibeSwift",
   GOVERNING_STATE: "Washington",
 
   // Price shown on the page. Must match your Stripe Price.

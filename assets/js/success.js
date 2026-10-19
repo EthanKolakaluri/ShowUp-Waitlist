@@ -1,9 +1,9 @@
-/* ShowUp waitlist — payment confirmation page */
+/* VibeSwift waitlist — payment confirmation page */
 (function () {
   "use strict";
 
-  var CFG = window.SHOWUP_CONFIG || {};
-  var STORE_KEY = "showup_reservation";
+  var CFG = window.VIBESWIFT_CONFIG || {};
+  var STORE_KEY = "vibeswift_reservation";
 
   function $(sel) { return document.querySelector(sel); }
   function isSet(v) { return typeof v === "string" && v.trim() !== ""; }
@@ -30,7 +30,7 @@
 
   function confetti() {
     if (reducedMotion()) return;
-    var colors = ["#FF5B35", "#FFC23D", "#FF9E80", "#C8401C", "#FFE4D9"];
+    var colors = ["#E0102F", "#B80D26", "#FFD6DB", "#24070C", "#FF8A9B"];
     var box = document.createElement("div");
     box.className = "confetti";
     box.setAttribute("aria-hidden", "true");
@@ -119,8 +119,8 @@
     if (!btn) return;
     var url = window.location.origin + window.location.pathname.replace(/success\.html$/, "");
     btn.addEventListener("click", function () {
-      var text = "I just reserved a Founding 500 spot on ShowUp. Your crew, planned for you.";
-      if (navigator.share) { navigator.share({ title: "ShowUp", text: text, url: url }).catch(function () {}); return; }
+      var text = "I just reserved a Founding 500 spot on VibeSwift. Your crew, planned for you.";
+      if (navigator.share) { navigator.share({ title: "VibeSwift", text: text, url: url }).catch(function () {}); return; }
       if (navigator.clipboard) {
         navigator.clipboard.writeText(url).then(function () {
           btn.textContent = "Link copied";

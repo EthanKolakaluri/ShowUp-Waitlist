@@ -1,6 +1,6 @@
-# ShowUp — Founding 500 waitlist
+# VibeSwift — Founding 500 waitlist
 
-The waitlist site for ShowUp. People reserve a Founding 500 spot for a one-time **$9.99** (which also covers their first month after launch). Payment runs through **hosted Stripe Checkout**, and every paid reservation lands in a **Google Sheet**.
+The waitlist site for VibeSwift. People reserve a Founding 500 spot for a one-time **$9.99** (which also covers their first month after launch). Payment runs through **hosted Stripe Checkout**, and every paid reservation lands in a **Google Sheet**.
 
 It's a plain static site on **GitHub Pages**. The only backend is a Google Apps Script attached to your Sheet, which talks to Stripe.
 
@@ -27,7 +27,7 @@ STRIPE_INTEGRATION_TODO.md  ← setup checklist
 1. A visitor fills in the form (name, email, age, interests).
 2. The site sends it to your Apps Script, which logs them in the Sheet's **Checkout started** tab and creates a Stripe Checkout Session.
 3. They pay on Stripe's hosted checkout page. Stripe redirects them to `success.html?session_id=…`.
-4. `success.html` asks the Apps Script to confirm. The script checks with **Stripe directly** that the session is paid, is a ShowUp reservation and is the right amount. It then adds a row to **Reservations**, marks their **Checkout started** row as **Paid**, and emails them a "You're in" confirmation from your Gmail.
+4. `success.html` asks the Apps Script to confirm. The script checks with **Stripe directly** that the session is paid, is a VibeSwift reservation and is the right amount. It then adds a row to **Reservations**, marks their **Checkout started** row as **Paid**, and emails them a "You're in" confirmation from your Gmail.
 5. If someone closes the tab before step 4, a sync that runs every 15 minutes finds their payment on Stripe, adds them and emails them anyway.
 
 Your Stripe secret key lives only inside Google Apps Script. It is never in this repo or on the public site.
