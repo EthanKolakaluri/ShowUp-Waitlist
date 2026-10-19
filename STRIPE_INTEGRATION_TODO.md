@@ -1,6 +1,6 @@
 # Stripe integration — to-do
 
-This is the single source of truth for finishing the Stripe setup on the ShowUp waitlist site.
+This is the single source of truth for finishing the Stripe setup on the VibeSwift waitlist site. (The backend, the Sheet menu and the emails still use the old name ShowUp; see the README.)
 
 The site uses **hosted Stripe Checkout**: when someone submits the reservation form, the Google Apps Script backend creates a Checkout Session and sends them to Stripe's payment page. After paying, Stripe sends them back to `success.html`, and the script confirms the payment with Stripe before adding them to the Google Sheet.
 
@@ -78,7 +78,7 @@ These parameters were configured in Checkout Studio and are already set correctl
 
 ### 2. Create the product
 
-1. Dashboard → **Product catalog → Add product**: "ShowUp Founding 500 reservation".
+1. Dashboard → **Product catalog → Add product**: "VibeSwift Founding 500 reservation". If you already made it as "ShowUp…", just rename the product here; the Price ID stays the same, so nothing else changes. This name is what people see on the Stripe checkout page. For the checkout's look, set **Settings → Branding**: icon `assets/img/icon-512.png`, brand and accent color `#E0102F`.
 2. Pricing: **One-off**, **$9.99 USD**.
 3. Copy the Price ID (`price_…`) into `CONFIG.STRIPE_PRICE_ID` in `apps-script/Code.gs`.
 
@@ -129,7 +129,7 @@ STRIPE_INTEGRATION_TODO.md  This file
 
 - **Self-serve, before launch.** The confirmation email and the success page carry a private link to `refund.html?ref=…&t=…`. The `t` part is a signature made with `REFUND_SECRET`, so a link only works for its own reservation. The page shows what they'll give up, then one click calls `POST /v1/refunds` for the payment (with an idempotency key, so it can't refund twice).
 - **What a refund does:** marks the **Reservations** row (**Refunded at**, **Refunded by**), adds a row to the **Refunds** tab, marks **Checkout started** as **Refunded**, frees the founding spot in the counter (spot numbers are never reused), and emails them a refund confirmation.
-- **You refunding someone** (for example a Show-Up Guarantee claim): open the Sheet, go to **Reservations**, click any cell in their row, then **ShowUp → Refund selected reservation**. The ShowUp menu appears a few seconds after the Sheet opens.
+- **You refunding someone** (for example a VibeSwift Guarantee claim): open the Sheet, go to **Reservations**, click any cell in their row, then **ShowUp → Refund selected reservation**. The ShowUp menu appears a few seconds after the Sheet opens.
 - **Refunds made in the Stripe Dashboard** are picked up by the 15-minute sync. A full refund frees the spot; a partial one is logged in **Refunds** and they keep their spot.
 - **At launch:** set `SELF_SERVE_REFUNDS: false` in `Code.gs` and deploy a new version. Refund links then say refunds by link have closed; the Sheet menu still works.
 
@@ -150,7 +150,7 @@ Use any future expiry date, any 3-digit CVC and any ZIP. After a successful paym
 - **Go live:** create the product and Price in live mode, then swap in the live Price ID and live secret key. Redeploy the Apps Script as a new version.
 - **Receipts:** the script sends the "You're in" email. For Stripe's own payment receipt as well, turn on **Settings → Customer emails → Successful payments** (Stripe only sends these in live mode).
 - **Confirmation emails:** they come from the Gmail account that owns the script, named "ShowUp". Free Gmail accounts can email 100 people a day; anyone past that shows **Waiting (daily email limit)** in the Sheet and is emailed automatically once the limit resets. To resend one, clear its **Confirmation email** cell and run `sendMissingConfirmationEmails`. Settings are in `CONFIRMATION_EMAIL` in `Code.gs`.
-- **Show-Up Guarantee refunds:** use **ShowUp → Refund selected reservation** in the Sheet (see Refunds above).
+- **VibeSwift Guarantee refunds:** use **ShowUp → Refund selected reservation** in the Sheet (see Refunds above).
 - **Order tracking:** the **Reservations** tab is your list of paying founding members, numbered #1–500. Once 500 spots are held (refunds free a spot), checkout closes and the form says so. The Sheet reads and writes columns by their header names, so you can reorder or delete columns you don't need (like an old **City** column) without breaking anything.
 - **Before taking real money:** fill in `LEGAL_NAME`, `GOVERNING_STATE` and `CONTACT_EMAIL` in `config.js` (the policy pages highlight them until you do), and have someone qualified review the Terms, Privacy Policy and Refund Policy.
 

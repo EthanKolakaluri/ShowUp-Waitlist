@@ -12,9 +12,10 @@
   <meta property="og:image" content="https://ethankolakaluri.github.io/ShowUp-Waitlist/assets/img/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/img/icon-512.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@600..800&family=Instrument+Sans:wght@400..700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400..800&display=swap">
   <link rel="stylesheet" href="assets/css/styles.css">
   <script>document.documentElement.classList.remove("no-js");</script>
   <script src="assets/js/config.js"></script>
@@ -26,7 +27,7 @@
   <header class="nav" id="nav">
     <div class="wrap nav__inner">
       <a class="brand" href="#top" aria-label="VibeSwift home">
-        <svg class="brand__mark" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="28" fill="#E0102F"/><path d="M10 52C18 52 21 32 30 32C38 32 44 58 50 74C56 58 62 26 70 26C79 26 82 52 90 52" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="brand__mark" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="30" fill="#E0102F"/><g class="friend friend--b"><path d="M65 47L50 76" stroke="#FFB3BF" stroke-width="18" stroke-linecap="round"/><circle cx="72" cy="27" r="11" fill="#FFB3BF"/></g><g class="friend friend--a"><path d="M35 47L50 76" stroke="#fff" stroke-width="18" stroke-linecap="round"/><circle cx="28" cy="27" r="11" fill="#fff"/></g></svg>
         <span class="brand__word">vibeswift</span>
       </a>
       <nav class="nav__links" aria-label="Sections">
@@ -40,29 +41,53 @@
   </header>
 
   <main id="top">
-    <!-- Hero: the wave draws once on load, with real plans riding its peaks -->
+    <!-- Hero: the plan card builds itself once, the way the app plans a hangout -->
     <section class="hero">
-      <div class="wrap">
-        <p class="status"><span class="status__dot" aria-hidden="true"></span>Founding 500 is open</p>
-        <h1 class="hero__title">Your crew,<br> planned for you.</h1>
-        <div class="hero__row">
+      <div class="wrap hero__grid">
+        <div class="hero__copy">
+          <p class="status"><span class="status__dot" aria-hidden="true"></span>Founding 500 is open</p>
+          <h1 class="hero__title"><span>Your crew,</span> <span>planned for you.</span></h1>
           <p class="hero__sub">VibeSwift matches you with your people and plans the hangouts. All you do is show up. Built for 18 to 29-year-olds who are done with swiping.</p>
           <div class="hero__ctas">
             <a class="btn btn--primary btn--lg" href="#reserve">Reserve your spot <span class="price-label">$9.99</span></a>
             <a class="btn btn--ghost btn--lg" href="#how">See how it works</a>
           </div>
+          <p class="hero__fine">One-time <span class="price-label">$9.99</span> holds your spot and covers your first month after launch.</p>
         </div>
-        <p class="hero__fine">One-time <span class="price-label">$9.99</span> holds your spot and covers your first month after launch.</p>
-      </div>
 
-      <div class="wave" aria-hidden="true">
-        <svg class="wave__line" viewBox="0 0 1440 220" preserveAspectRatio="none">
-          <path pathLength="1" d="M0 150C90 150 130 90 210 90C290 90 330 170 400 170C470 170 510 70 590 70C670 70 700 130 720 196C740 130 790 40 870 40C950 40 990 150 1070 150C1150 150 1190 100 1270 100C1350 100 1390 150 1440 150"/>
-        </svg>
-        <div class="plan plan--a" style="--x:14.6%; --y:90px; --i:0"><span class="plan__when">Thu, 8:00 pm</span><span class="plan__what">Trivia night</span><span class="plan__who">4 going</span></div>
-        <div class="plan plan--b" style="--x:60.4%; --y:40px; --i:1"><span class="plan__when">Sat, 7:00 pm</span><span class="plan__what">Taco crawl + arcade</span><span class="plan__who">5 going, in budget</span></div>
-        <div class="plan plan--c" style="--x:88.2%; --y:100px; --i:2"><span class="plan__when">Sun, 9:00 am</span><span class="plan__what">Sunset hike</span><span class="plan__who">6 going</span></div>
-        <div class="checkin" style="--x:50%; --y:196px"><span class="checkin__dot"></span>+15 credits for showing up</div>
+        <div class="demo reveal" aria-hidden="true">
+          <div class="plancard">
+            <div class="plancard__top">
+              <span class="plancard__crew">Saturday crew</span>
+              <span class="stamp"><svg viewBox="0 0 100 100"><rect width="100" height="100" rx="30" fill="#E0102F"/><g class="friend friend--b"><path d="M65 47L50 76" stroke="#FFB3BF" stroke-width="18" stroke-linecap="round"/><circle cx="72" cy="27" r="11" fill="#FFB3BF"/></g><g class="friend friend--a"><path d="M35 47L50 76" stroke="#fff" stroke-width="18" stroke-linecap="round"/><circle cx="28" cy="27" r="11" fill="#fff"/></g></svg>Planned for you</span>
+            </div>
+            <p class="plancard__what">Taco crawl, then arcade</p>
+            <div>
+              <p class="plancard__label">Best time for all 5</p>
+              <div class="slots">
+                <span class="slot slot--no" style="--i:0">Fri 8:00 pm</span>
+                <span class="slot slot--pick" style="--i:1"><svg viewBox="0 0 14 14"><path d="M2.5 7.5l3 3 6-7"/></svg>Sat 7:00 pm</span>
+                <span class="slot slot--no" style="--i:2">Sun 6:30 pm</span>
+              </div>
+            </div>
+            <ul class="facts">
+              <li style="--i:0"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>Casa Lupe, then Pixel Pit arcade</li>
+              <li style="--i:1"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M16 15h2"/></svg>About $18 each, inside everyone's budget</li>
+            </ul>
+            <div class="plancard__foot">
+              <div class="faces">
+                <span class="face" style="--i:0; --c:#24070C">You</span>
+                <span class="face" style="--i:1; --c:#E0102F">M</span>
+                <span class="face" style="--i:2; --c:#B80D26">J</span>
+                <span class="face" style="--i:3; --c:#FF7A8E">P</span>
+                <span class="face" style="--i:4; --c:#6B4A50">S</span>
+              </div>
+              <span class="going"></span>
+            </div>
+          </div>
+          <p class="toast toast--match"><span class="toast__dot"></span>You and Maya both love trivia</p>
+          <p class="toast toast--credit"><span class="toast__dot"></span>Maya checked in. +15 credits</p>
+        </div>
       </div>
     </section>
 
@@ -100,12 +125,12 @@
     <section class="section" id="how">
       <div class="wrap">
         <h2 class="h2">You tap accept. We plan the rest.</h2>
-        <ol class="steps">
-          <li class="step"><span class="step__num">1</span><h3>Match</h3><p>A 3-minute quiz, then daily top friend matches with the reason you'd click.</p></li>
-          <li class="step"><span class="step__num">2</span><h3>Crew</h3><p>Join a matched crew of 4–6, or build your own from your top matches.</p></li>
-          <li class="step"><span class="step__num">3</span><h3>Plan</h3><p>The AI picks a time that works for everyone and a spot in your budget.</p></li>
-          <li class="step step--you"><span class="step__num">4</span><h3>Show up</h3><p>Your only job. Tap accept, go, and check in at the venue.</p></li>
-          <li class="step"><span class="step__num">5</span><h3>Earn</h3><p>Every verified check-in earns credits toward more plans.</p></li>
+        <ol class="steps reveal">
+          <li class="step"><span class="step__num" style="--i:0">1</span><h3>Match</h3><p>A 3-minute quiz, then daily top friend matches with the reason you'd click.</p></li>
+          <li class="step"><span class="step__num" style="--i:1">2</span><h3>Crew</h3><p>Join a matched crew of <span class="nowrap">4–6</span>, or build your own from your top matches.</p></li>
+          <li class="step"><span class="step__num" style="--i:2">3</span><h3>Plan</h3><p>The AI picks a time that works for everyone and a spot in your budget.</p></li>
+          <li class="step step--you"><span class="step__num" style="--i:3">4</span><h3>Show up</h3><p>Your only job. Tap accept, go, and check in at the venue.</p></li>
+          <li class="step"><span class="step__num" style="--i:4">5</span><h3>Earn</h3><p>Every verified check-in earns credits toward more plans.</p></li>
         </ol>
       </div>
     </section>
@@ -368,10 +393,12 @@
 
     <!-- Final call to action -->
     <section class="final">
-      <svg class="final__wave" viewBox="0 0 1440 220" preserveAspectRatio="none" aria-hidden="true"><path d="M0 150C90 150 130 90 210 90C290 90 330 170 400 170C470 170 510 70 590 70C670 70 700 130 720 196C740 130 790 40 870 40C950 40 990 150 1070 150C1150 150 1190 100 1270 100C1350 100 1390 150 1440 150"/></svg>
       <div class="wrap final__inner">
-        <h2>Your crew is out there. We'll plan the first hangout.</h2>
-        <a class="btn btn--light btn--lg" href="#reserve">Reserve your spot <span class="price-label">$9.99</span></a>
+        <div class="final__copy">
+          <h2>Your crew is out there. We'll plan the first hangout.</h2>
+          <a class="btn btn--light btn--lg" href="#reserve">Reserve your spot <span class="price-label">$9.99</span></a>
+        </div>
+        <svg class="final__mark reveal" viewBox="0 0 100 100" aria-hidden="true"><g class="friend friend--b"><path d="M65 47L50 76" stroke="#FFB3BF" stroke-width="18" stroke-linecap="round"/><circle cx="72" cy="27" r="11" fill="#FFB3BF"/></g><g class="friend friend--a"><path d="M35 47L50 76" stroke="#fff" stroke-width="18" stroke-linecap="round"/><circle cx="28" cy="27" r="11" fill="#fff"/></g></svg>
       </div>
     </section>
   </main>
@@ -379,7 +406,7 @@
   <footer class="footer">
     <div class="wrap footer__inner">
       <a class="brand" href="#top" aria-label="VibeSwift home">
-        <svg class="brand__mark" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="28" fill="#E0102F"/><path d="M10 52C18 52 21 32 30 32C38 32 44 58 50 74C56 58 62 26 70 26C79 26 82 52 90 52" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="brand__mark" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="30" fill="#E0102F"/><g class="friend friend--b"><path d="M65 47L50 76" stroke="#FFB3BF" stroke-width="18" stroke-linecap="round"/><circle cx="72" cy="27" r="11" fill="#FFB3BF"/></g><g class="friend friend--a"><path d="M35 47L50 76" stroke="#fff" stroke-width="18" stroke-linecap="round"/><circle cx="28" cy="27" r="11" fill="#fff"/></g></svg>
         <span class="brand__word">vibeswift</span>
       </a>
       <nav class="footer__links" aria-label="Policies">
