@@ -160,7 +160,7 @@ html:not(.no-js) .demo.reveal:not(.in) *, html:not(.no-js) .demo.reveal:not(.in)
   animation: pop .45s var(--spring) calc(var(--t) + 2.4s + var(--i) * .12s) both;
 }
 .face:first-child { margin-left: 0; }
-.going { font-size: 14px; font-weight: 700; color: var(--red-ink); font-variant-numeric: tabular-nums; animation: rise .3s var(--ease) calc(var(--t) + 2.35s) both, going .6s steps(5, end) calc(var(--t) + 2.45s) both; counter-reset: n var(--n); }
+.going { font-size: 14px; font-weight: 700; color: var(--red-ink); font-variant-numeric: tabular-nums; animation: rise .3s var(--ease) calc(var(--t) + 2.35s) both, going .6s steps(5, start) calc(var(--t) + 2.35s) both; counter-reset: n var(--n); }
 .going::before { content: counter(n) " of 5 going"; }
 .toast {
   position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 9px;
